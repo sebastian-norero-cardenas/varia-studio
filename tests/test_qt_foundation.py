@@ -630,7 +630,6 @@ class CoordinatorContractTests(unittest.TestCase):
         shell.close()
         pump_until(lambda: coordinator.lifecycle is Lifecycle.CLOSED and not shell.isVisible())
 
-
     def test_broken_gui_logging_does_not_break_stale_callback_or_close(self):
         coordinator, shell = self.make(max_workers=2)
         entered = threading.Event()
