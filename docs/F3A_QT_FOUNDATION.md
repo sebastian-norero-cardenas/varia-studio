@@ -9,7 +9,7 @@ CustomTkinter application. The canonical `varia-studio` and compatibility
 
 - `AppState` remains the single committed dataset store.
 - `QtCoordinator` owns publication policy and lifecycle.
-- `QtTaskRunner` owns one private two-worker `ThreadPoolExecutor`; Qt signals remain the GUI-thread publication boundary.
+- `QtTaskRunner` owns at most two per-request `QThread` workers; Qt signals remain the GUI-thread publication boundary.
 - The runner queue is application-managed and bounded to eight pending requests.
 - Workers receive only a callable, cancellation Event and immutable revision
   metadata. They never receive live `AppState`, widgets or view callbacks.
@@ -152,10 +152,10 @@ technical logs.
 
 R4 removes the R3 assumption that a signal emitted inside a QRunnable, plus a
 queued GUI turn, proves physical return. The bounded scheduler keeps two worker
-slots and eight application-pending requests but uses a private
-`ThreadPoolExecutor` so each submitted request has a standard-library Future.
-Outcome publication may happen before the callable returns; scheduler ownership
-remains in `_active` until that request's Future is done. The historical
+slots and eight application-pending requests and uses one owned `QThread` per
+admitted request. Outcome publication may happen before `run()` returns;
+scheduler ownership remains in `_active` until that request's Qt
+`finished` signal, which is emitted after `run()` returns. The historical
 `physical_finished` bridge signal is retained only as a pre-return adversarial
 checkpoint and is never used to release ownership. Consequently a replacement
 LOAD stays in the application queue while its predecessor is physically owned,

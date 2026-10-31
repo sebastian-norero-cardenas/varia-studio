@@ -6,12 +6,11 @@ import logging
 import threading
 import time
 from collections import OrderedDict
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Any, Callable
 
-from PySide6.QtCore import QObject, Qt, Signal, Slot
+from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
 
 from ..data import CancelledError
 from .diagnostics import best_effort_exception_log, best_effort_log
@@ -155,13 +154,29 @@ class _Runnable:
         self.bridge.physical_finished.emit(self.request.token)
 
 
+class _TaskThread(QThread):
+    """Qt-owned thread whose finished signal follows _Runnable.run() return."""
+
+    def __init__(
+        self,
+        request: _Request,
+        bridge: _Bridge,
+        parent: QObject | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.runnable = _Runnable(request, bridge)
+
+    def run(self) -> None:
+        self.runnable.run()
+
+
 class QtTaskRunner(QObject):
-    """Application-owned scheduler in front of a private two-worker executor.
+    """Application-owned scheduler with at most two owned Qt worker threads.
 
     Runner bookkeeping is GUI-thread-only. Worker threads receive only their
     work callable and a cancellation Event, then emit a typed TaskOutcome.
-    Physical ownership is released only after the per-request Future is done,
-    which means the worker callable has returned.
+    Physical ownership is released from QThread.finished, after the per-request
+    run() method has returned.
     """
 
     outcome_ready = Signal(object)
@@ -183,10 +198,6 @@ class QtTaskRunner(QObject):
 
         self.max_workers = max_workers
         self.max_pending = max_pending
-        self._executor = ThreadPoolExecutor(
-            max_workers=max_workers,
-            thread_name_prefix="varia-qt",
-        )
         self._bridge = _Bridge(self)
         self._bridge.outcome.connect(self._on_worker_outcome)
         self._bridge.runnable_returned.connect(
@@ -198,7 +209,7 @@ class QtTaskRunner(QObject):
         self._logical: dict[str, int] = {}
         self._queued: OrderedDict[str, _Request] = OrderedDict()
         self._active: dict[tuple[str, int], _Request] = {}
-        self._futures: dict[tuple[str, int], Any] = {}
+        self._threads: dict[tuple[str, int], _TaskThread] = {}
         self._accepting = True
         self._closing = False
 
@@ -343,12 +354,13 @@ class QtTaskRunner(QObject):
             self.physical_idle.emit()
 
     def finalize(self) -> None:
-        """Release executor resources after per-request physical activity is zero."""
+        """Finalize after all per-request worker threads have finished."""
         if self.activity.physical:
             raise RuntimeError("Cannot finalize while physical tasks are active.")
+        if self._threads:
+            raise RuntimeError("Worker thread ownership remained after physical idle.")
         self._accepting = False
         self._closing = True
-        self._executor.shutdown(wait=False, cancel_futures=True)
 
     def _can_start(self, request: _Request) -> bool:
         if len(self._active) >= self.max_workers:
@@ -369,14 +381,15 @@ class QtTaskRunner(QObject):
             physical=len(self._active),
             queued=len(self._queued),
         )
-        runnable = _Runnable(request, self._bridge)
-        future = self._executor.submit(runnable.run)
-        self._futures[key] = future
+        thread = _TaskThread(request, self._bridge, self)
+        self._threads[key] = thread
         bridge = self._bridge
         token = request.token
-        future.add_done_callback(
-            lambda _future, bridge=bridge, token=token: bridge.runnable_returned.emit(token)
+        thread.finished.connect(
+            lambda bridge=bridge, token=token: bridge.runnable_returned.emit(token),
+            Qt.ConnectionType.DirectConnection,
         )
+        thread.start()
 
     def _schedule(self) -> None:
         if self._closing:
@@ -417,8 +430,8 @@ class QtTaskRunner(QObject):
                 **common_fields,
             )
 
-        # Logical publication may complete before the worker callable returns.
-        # _active remains authoritative until the per-request Future is done.
+        # Logical publication may complete before the worker run() returns.
+        # _active remains authoritative until that QThread emits finished.
         self.outcome_ready.emit(outcome)
         if self._logical.get(token.key) == token.generation:
             self._logical.pop(token.key, None)
@@ -428,7 +441,9 @@ class QtTaskRunner(QObject):
     def _on_runnable_returned(self, token: TaskToken) -> None:
         key = (token.key, token.generation)
         request = self._active.pop(key, None)
-        self._futures.pop(key, None)
+        thread = self._threads.pop(key, None)
+        if thread is not None:
+            thread.deleteLater()
         if request is None:
             return
         best_effort_log(
@@ -443,7 +458,7 @@ class QtTaskRunner(QObject):
             best_effort_log(
                 logger,
                 logging.DEBUG,
-                "task_executor_physical_idle",
+                "task_thread_scheduler_physical_idle",
                 logical=len(self._logical),
                 physical=0,
                 queued=len(self._queued),
