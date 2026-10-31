@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Any, Callable
 
-from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, Signal, Slot
+from PySide6.QtCore import QObject, QRunnable, QThreadPool, Qt, Signal, Slot
 
 from ..data import CancelledError
 from .diagnostics import best_effort_log, safe_error_fields
@@ -176,6 +176,8 @@ class QtTaskRunner(QObject):
     outcome_ready = Signal(object)
     activity_changed = Signal(object)
     physical_idle = Signal()
+    _physical_release_requested = Signal(object)
+    _idle_recheck_requested = Signal()
 
     def __init__(
         self,
@@ -197,6 +199,14 @@ class QtTaskRunner(QObject):
         self._bridge = _Bridge(self)
         self._bridge.outcome.connect(self._on_worker_outcome)
         self._bridge.physical_finished.connect(self._on_worker_physical_finished)
+        self._physical_release_requested.connect(
+            self._complete_physical,
+            Qt.ConnectionType.QueuedConnection,
+        )
+        self._idle_recheck_requested.connect(
+            self._check_physical_idle,
+            Qt.ConnectionType.QueuedConnection,
+        )
 
         self._generation: dict[str, int] = {}
         self._logical: dict[str, int] = {}
@@ -424,10 +434,11 @@ class QtTaskRunner(QObject):
             **_token_fields(token),
         )
         # Cross-thread delivery can occur immediately before QRunnable.run()
-        # returns. Release scheduler ownership on the following GUI event turn;
-        # the per-group lock remains the final non-overlap guard.
-        QTimer.singleShot(0, lambda token=token: self._complete_physical(token))
+        # returns. Release scheduler ownership on the following GUI event turn.
+        # A queued Qt signal keeps the deferred call tied to this QObject.
+        self._physical_release_requested.emit(token)
 
+    @Slot(object)
     def _complete_physical(self, token: TaskToken) -> None:
         request = self._active.pop((token.key, token.generation), None)
         if request is None:
@@ -460,7 +471,7 @@ class QtTaskRunner(QObject):
             if self._closing:
                 self.physical_idle.emit()
             return
-        QTimer.singleShot(0, self._check_physical_idle)
+        self._idle_recheck_requested.emit()
 
     def _emit_activity(self) -> None:
         self.activity_changed.emit(self.activity)

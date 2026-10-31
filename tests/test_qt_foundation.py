@@ -530,6 +530,7 @@ class CoordinatorContractTests(unittest.TestCase):
         if coordinator.lifecycle is not Lifecycle.CLOSED:
             pump_until(lambda: coordinator.lifecycle is Lifecycle.CLOSED)
         shell.deleteLater()
+        coordinator.deleteLater()
         APP.processEvents()
 
     def write(self, directory, name, text):
