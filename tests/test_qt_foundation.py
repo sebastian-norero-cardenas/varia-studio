@@ -61,8 +61,6 @@ def pump_until(predicate, timeout_ms=5000):
         raise AssertionError("Qt condition did not become true before timeout")
 
 
-
-
 class BrokenLoggingHandler(logging.Handler):
     def emit(self, record):
         raise RuntimeError("qa-broken-log-sink")
@@ -103,6 +101,7 @@ def captured_qt_logging():
         target.handlers = old_handlers
         target.setLevel(old_level)
         target.propagate = old_propagate
+
 
 class RecordingShell(QtShell):
     def __init__(self):
@@ -236,7 +235,6 @@ class RunnerContractTests(unittest.TestCase):
         self.assertIn("event=task_physical_finished " + identity, log_text)
         self.assertIn("event=task_outcome_received " + identity, log_text)
         self.assertIn("elapsed_ms=", log_text)
-
 
     def test_broken_logging_cannot_change_success_error_or_cancel_semantics(self):
         runner = self.make_runner(max_workers=1)
@@ -620,9 +618,7 @@ class CoordinatorContractTests(unittest.TestCase):
         self.assertIn("exception_class=ValueError", messages)
         self.assertIn("event=error_presenter_failed", messages)
         self.assertIn("presenter_exception_class=RuntimeError", messages)
-        self.assertTrue(
-            all(record.exc_info is None for record in captured.records)
-        )
+        self.assertTrue(all(record.exc_info is None for record in captured.records))
         self.assertNotIn("qa-presenter-boom", messages)
         self.assertEqual(shell.presenter_calls, 1)
 
@@ -670,9 +666,7 @@ class CoordinatorContractTests(unittest.TestCase):
 
             shell.show()
             shell.close()
-            pump_until(
-                lambda: coordinator.lifecycle is Lifecycle.CLOSED and not shell.isVisible()
-            )
+            pump_until(lambda: coordinator.lifecycle is Lifecycle.CLOSED and not shell.isVisible())
 
     def test_bound_qobject_callback_is_inferred_and_discarded_if_destroyed(self):
         coordinator, shell = self.make(max_workers=1)
