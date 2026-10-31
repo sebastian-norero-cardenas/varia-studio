@@ -3,19 +3,23 @@
 from __future__ import annotations
 
 import gc
+import io
+import logging
 import os
 import subprocess
 import sys
 import tempfile
 import threading
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import numpy as np
-from PySide6.QtCore import QEventLoop, QObject, QTimer
-from PySide6.QtWidgets import QApplication
+import shiboken6
+from PySide6.QtCore import QEventLoop, QObject, QTimer, Qt
+from PySide6.QtWidgets import QApplication, QLabel
 
 from csv_analyzer.data import CancelledError, load_dataset
 from csv_analyzer.qt_app.bootstrap import create_application
@@ -56,6 +60,49 @@ def pump_until(predicate, timeout_ms=5000):
     if timed_out["value"] and not predicate():
         raise AssertionError("Qt condition did not become true before timeout")
 
+
+
+
+class BrokenLoggingHandler(logging.Handler):
+    def emit(self, record):
+        raise RuntimeError("qa-broken-log-sink")
+
+
+@contextmanager
+def broken_qt_logging():
+    target = logging.getLogger("csv_analyzer.qt_app")
+    old_handlers = list(target.handlers)
+    old_level = target.level
+    old_propagate = target.propagate
+    target.handlers = [BrokenLoggingHandler()]
+    target.setLevel(logging.DEBUG)
+    target.propagate = False
+    try:
+        yield
+    finally:
+        target.handlers = old_handlers
+        target.setLevel(old_level)
+        target.propagate = old_propagate
+
+
+@contextmanager
+def captured_qt_logging():
+    target = logging.getLogger("csv_analyzer.qt_app")
+    old_handlers = list(target.handlers)
+    old_level = target.level
+    old_propagate = target.propagate
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(logging.Formatter("%(levelname)s:%(name)s:%(message)s"))
+    target.handlers = [handler]
+    target.setLevel(logging.DEBUG)
+    target.propagate = False
+    try:
+        yield stream
+    finally:
+        target.handlers = old_handlers
+        target.setLevel(old_level)
+        target.propagate = old_propagate
 
 class RecordingShell(QtShell):
     def __init__(self):
@@ -189,6 +236,200 @@ class RunnerContractTests(unittest.TestCase):
         self.assertIn("event=task_physical_finished " + identity, log_text)
         self.assertIn("event=task_outcome_received " + identity, log_text)
         self.assertIn("elapsed_ms=", log_text)
+
+
+    def test_broken_logging_cannot_change_success_error_or_cancel_semantics(self):
+        runner = self.make_runner(max_workers=1)
+        outcomes = []
+        runner.outcome_ready.connect(outcomes.append)
+
+        with broken_qt_logging():
+            runner.submit(
+                "success-broken-log",
+                lambda cancel: "ok",
+                application_epoch=1,
+                dataset_revision=2,
+                selection_revision=3,
+            )
+            pump_until(lambda: runner.activity.physical == 0)
+        self.assertEqual(outcomes[-1].status, TaskStatus.SUCCESS)
+        self.assertEqual(outcomes[-1].value, "ok")
+        self.assertEqual(runner._active, {})
+        self.assertEqual(runner.activity.logical, 0)
+
+        def fail(cancel):
+            raise ValueError("private-worker-message")
+
+        with broken_qt_logging():
+            runner.submit(
+                "error-broken-log",
+                fail,
+                application_epoch=1,
+                dataset_revision=2,
+                selection_revision=3,
+            )
+            pump_until(lambda: runner.activity.physical == 0)
+        self.assertEqual(outcomes[-1].status, TaskStatus.ERROR)
+        self.assertIsInstance(outcomes[-1].error, ValueError)
+        self.assertEqual(str(outcomes[-1].error), "private-worker-message")
+        self.assertEqual(runner._active, {})
+        self.assertEqual(runner.activity.logical, 0)
+
+        entered = threading.Event()
+        release = threading.Event()
+
+        def cancellable(cancel):
+            entered.set()
+            release.wait(timeout=5)
+            return "late"
+
+        with broken_qt_logging():
+            runner.submit(
+                "cancel-broken-log",
+                cancellable,
+                application_epoch=1,
+                dataset_revision=2,
+                selection_revision=3,
+            )
+            self.assertTrue(entered.wait(timeout=2))
+            runner.cancel("cancel-broken-log")
+            release.set()
+            pump_until(lambda: runner.activity.physical == 0)
+        self.assertEqual(outcomes[-1].status, TaskStatus.CANCELLED)
+        self.assertEqual(runner._active, {})
+        self.assertEqual(runner.activity.logical, 0)
+        self.assertEqual(runner.activity.physical, 0)
+
+    def test_safe_formatter_omits_private_exception_payloads(self):
+        runner = self.make_runner()
+        outcomes = []
+        runner.outcome_ready.connect(outcomes.append)
+
+        private_markers = (
+            "/home/private-user/secret/input.csv",
+            "input.csv",
+            "CELL_SECRET_9381",
+            "HEADER_PRIVATE_X",
+            "EXCEPTION_PRIVATE_MESSAGE",
+            "CAUSE_PRIVATE_MESSAGE",
+        )
+
+        def fail(cancel):
+            try:
+                raise KeyError("CAUSE_PRIVATE_MESSAGE CELL_SECRET_9381")
+            except KeyError as cause:
+                raise ValueError(
+                    "/home/private-user/secret/input.csv input.csv "
+                    "HEADER_PRIVATE_X EXCEPTION_PRIVATE_MESSAGE"
+                ) from cause
+
+        with captured_qt_logging() as stream:
+            runner.submit(
+                "privacy-check",
+                fail,
+                application_epoch=4,
+                dataset_revision=5,
+                selection_revision=6,
+            )
+            pump_until(lambda: runner.activity.physical == 0)
+
+        formatted = stream.getvalue()
+        for marker in private_markers:
+            self.assertNotIn(marker, formatted)
+        self.assertIn("event=task_worker_error", formatted)
+        self.assertIn("exception_class=ValueError", formatted)
+        self.assertIn("cause_class=KeyError", formatted)
+        self.assertIn("key=privacy-check", formatted)
+        self.assertIn("generation=1", formatted)
+        self.assertEqual(outcomes[-1].status, TaskStatus.ERROR)
+        self.assertIn("EXCEPTION_PRIVATE_MESSAGE", str(outcomes[-1].error))
+
+    def test_exclusive_load_waits_for_post_outcome_worker_tail(self):
+        runner = self.make_runner(max_workers=2)
+        outcomes = []
+        runner.outcome_ready.connect(outcomes.append)
+        tail_entered = threading.Event()
+        tail_release = threading.Event()
+        second_started = threading.Event()
+
+        def hold_first_tail(outcome):
+            if outcome.token.key == "load" and outcome.token.generation == 1:
+                tail_entered.set()
+                tail_release.wait(timeout=5)
+
+        runner._bridge.outcome.connect(
+            hold_first_tail,
+            Qt.ConnectionType.DirectConnection,
+        )
+
+        first = runner.submit(
+            "load",
+            lambda cancel: "first",
+            application_epoch=0,
+            dataset_revision=0,
+            selection_revision=0,
+            exclusive_group="load",
+        )
+        self.assertEqual(first.generation, 1)
+        self.assertTrue(tail_entered.wait(timeout=2))
+        pump_until(lambda: len(outcomes) == 1)
+
+        def second_work(cancel):
+            second_started.set()
+            return "second"
+
+        second = runner.submit(
+            "load",
+            second_work,
+            application_epoch=0,
+            dataset_revision=0,
+            selection_revision=0,
+            exclusive_group="load",
+        )
+        self.assertEqual(second.generation, 2)
+        APP.processEvents()
+        self.assertFalse(second_started.is_set())
+        self.assertEqual(runner.activity.queued, 1)
+        self.assertEqual(runner.activity.physical, 1)
+
+        tail_release.set()
+        pump_until(lambda: second_started.is_set())
+        pump_until(lambda: runner.activity.physical == 0)
+        self.assertEqual([item.token.generation for item in outcomes], [1, 2])
+        self.assertEqual([item.value for item in outcomes], ["first", "second"])
+
+    def test_closing_waits_for_post_outcome_worker_tail(self):
+        runner = self.make_runner(max_workers=2)
+        tail_entered = threading.Event()
+        tail_release = threading.Event()
+        idle = []
+        runner.physical_idle.connect(lambda: idle.append(True))
+
+        def hold_tail(outcome):
+            tail_entered.set()
+            tail_release.wait(timeout=5)
+
+        runner._bridge.outcome.connect(
+            hold_tail,
+            Qt.ConnectionType.DirectConnection,
+        )
+        runner.submit(
+            "tail-close",
+            lambda cancel: "done",
+            application_epoch=0,
+            dataset_revision=0,
+            selection_revision=0,
+        )
+        self.assertTrue(tail_entered.wait(timeout=2))
+        APP.processEvents()
+        runner.begin_closing()
+        self.assertEqual(runner.activity.logical, 0)
+        self.assertEqual(runner.activity.physical, 1)
+        self.assertEqual(idle, [])
+
+        tail_release.set()
+        pump_until(lambda: runner.activity.physical == 0)
+        pump_until(lambda: idle == [True])
 
     def test_cancel_is_logical_before_physical_completion(self):
         runner = self.make_runner(max_workers=1)
@@ -380,11 +621,9 @@ class CoordinatorContractTests(unittest.TestCase):
         self.assertIn("event=error_presenter_failed", messages)
         self.assertIn("presenter_exception_class=RuntimeError", messages)
         self.assertTrue(
-            any(
-                record.exc_info is not None and "error_presenter_failed" in record.getMessage()
-                for record in captured.records
-            )
+            all(record.exc_info is None for record in captured.records)
         )
+        self.assertNotIn("qa-presenter-boom", messages)
         self.assertEqual(shell.presenter_calls, 1)
 
         seen = []
@@ -393,6 +632,103 @@ class CoordinatorContractTests(unittest.TestCase):
 
         shell.close()
         pump_until(lambda: coordinator.lifecycle is Lifecycle.CLOSED and not shell.isVisible())
+
+
+    def test_broken_gui_logging_does_not_break_stale_callback_or_close(self):
+        coordinator, shell = self.make(max_workers=2)
+        entered = threading.Event()
+        release = threading.Event()
+        seen = []
+
+        def old(cancel):
+            entered.set()
+            release.wait(timeout=5)
+            return "old"
+
+        def broken_callback(value):
+            raise RuntimeError("CALLBACK_PRIVATE_MARKER")
+
+        with broken_qt_logging():
+            coordinator.submit_task("same-broken-log", old, success=seen.append)
+            self.assertTrue(entered.wait(timeout=2))
+            coordinator.submit_task(
+                "same-broken-log",
+                lambda cancel: "new",
+                success=seen.append,
+            )
+            pump_until(lambda: seen == ["new"])
+            release.set()
+            pump_until(lambda: coordinator.runner.activity.physical == 0)
+            self.assertEqual(seen, ["new"])
+
+            coordinator.submit_task(
+                "callback-broken-log",
+                lambda cancel: 1,
+                success=broken_callback,
+            )
+            pump_until(lambda: any("CALLBACK_PRIVATE_MARKER" in item for item in shell.errors))
+
+            shell.show()
+            shell.close()
+            pump_until(
+                lambda: coordinator.lifecycle is Lifecycle.CLOSED and not shell.isVisible()
+            )
+
+    def test_bound_qobject_callback_is_inferred_and_discarded_if_destroyed(self):
+        coordinator, shell = self.make(max_workers=1)
+        label = QLabel("before")
+        entered = threading.Event()
+        release = threading.Event()
+
+        def work(cancel):
+            entered.set()
+            release.wait(timeout=5)
+            return "after"
+
+        coordinator.submit_task(
+            "bound-destroyed",
+            work,
+            success=label.setText,
+        )
+        self.assertTrue(entered.wait(timeout=2))
+        shiboken6.delete(label)
+        self.assertFalse(shiboken6.isValid(label))
+        release.set()
+        pump_until(lambda: coordinator.runner.activity.physical == 0)
+        self.assertEqual(shell.errors, [])
+
+    def test_bound_qobject_live_and_plain_python_callbacks_still_work(self):
+        coordinator, shell = self.make()
+        label = QLabel("before")
+        seen = []
+
+        coordinator.submit_task(
+            "bound-live",
+            lambda cancel: "after",
+            success=label.setText,
+        )
+        pump_until(lambda: label.text() == "after")
+
+        coordinator.submit_task(
+            "plain-python",
+            lambda cancel: 7,
+            success=seen.append,
+        )
+        pump_until(lambda: seen == [7])
+
+    def test_success_and_failure_qobjects_have_independent_inferred_receivers(self):
+        coordinator, shell = self.make()
+        success_label = QLabel("before")
+        failure_label = QLabel("unused")
+
+        coordinator.submit_task(
+            "independent-receivers",
+            lambda cancel: "success",
+            success=success_label.setText,
+            failure=failure_label.setText,
+        )
+        shiboken6.delete(failure_label)
+        pump_until(lambda: success_label.text() == "success")
 
     def test_cancel_and_late_result_never_publish(self):
         coordinator, shell = self.make(max_workers=1)
@@ -587,16 +923,19 @@ class CoordinatorContractTests(unittest.TestCase):
 
 
 class ShellCloseProbeTests(unittest.TestCase):
-    def run_probe(self, action, worker):
+    def run_probe(self, action, worker, *, broken_logging=False):
+        command = [
+            sys.executable,
+            str(ROOT / "tools" / "f3a_qt_close_probe.py"),
+            "--action",
+            action,
+            "--worker",
+            worker,
+        ]
+        if broken_logging:
+            command.append("--broken-logging")
         result = subprocess.run(
-            [
-                sys.executable,
-                str(ROOT / "tools" / "f3a_qt_close_probe.py"),
-                "--action",
-                action,
-                "--worker",
-                worker,
-            ],
+            command,
             cwd=ROOT,
             text=True,
             capture_output=True,
@@ -609,6 +948,16 @@ class ShellCloseProbeTests(unittest.TestCase):
         self.assertIn("window_closed=true", result.stdout)
         self.assertIn("late_publications=0", result.stdout)
         self.assertIn("event_loop_exit_code=0", result.stdout)
+        self.assertIn(
+            f"broken_logging={str(broken_logging).lower()}",
+            result.stdout,
+        )
+
+    def test_broken_logging_cannot_block_real_quit_or_window_close(self):
+        for action in ("quit", "window"):
+            for worker in ("none", "noncancelable"):
+                with self.subTest(action=action, worker=worker):
+                    self.run_probe(action, worker, broken_logging=True)
 
     def test_quit_button_exits_real_event_loop(self):
         for worker in ("none", "cooperative", "noncancelable"):

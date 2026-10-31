@@ -61,7 +61,7 @@ jobs:
           echo "pyside6=$(python -c 'import PySide6; print(PySide6.__version__)')"
 
   verify:
-    name: F3.A R2 regression / build / installed smokes
+    name: F3.A R3 regression / build / installed smokes
     needs: focal-python
     runs-on: ubuntu-22.04
     timeout-minutes: 45
@@ -130,19 +130,19 @@ jobs:
           sha256sum dist/* | tee dist/SHA256SUMS
 
       - name: Create external runtime directory
-        run: mkdir -p /tmp/varia-f3a-r2-runtime
+        run: mkdir -p /tmp/varia-f3a-r3-runtime
 
       - name: Clean base install without Qt extra
         shell: bash
         run: |
           set -euxo pipefail
           WHEEL="$(readlink -f "$(ls dist/*.whl)")"
-          python -m venv /tmp/varia-f3a-r2-base
-          /tmp/varia-f3a-r2-base/bin/python -m pip install --upgrade pip
-          /tmp/varia-f3a-r2-base/bin/pip install \
+          python -m venv /tmp/varia-f3a-r3-base
+          /tmp/varia-f3a-r3-base/bin/python -m pip install --upgrade pip
+          /tmp/varia-f3a-r3-base/bin/pip install \
             -c "$GITHUB_WORKSPACE/constraints-python312.txt" "$WHEEL"
-          /tmp/varia-f3a-r2-base/bin/pip check
-          /tmp/varia-f3a-r2-base/bin/python - <<'PY' | tee dist/base-environment.txt
+          /tmp/varia-f3a-r3-base/bin/pip check
+          /tmp/varia-f3a-r3-base/bin/python - <<'PY' | tee dist/base-environment.txt
           import importlib.util
           assert importlib.util.find_spec("PySide6") is None
           print("base_pyside6=ABSENT")
@@ -154,10 +154,10 @@ jobs:
           QT_QPA_PLATFORM: xcb
         run: |
           set -euxo pipefail
-          cd /tmp/varia-f3a-r2-runtime
-          env -u PYTHONPATH /tmp/varia-f3a-r2-base/bin/varia-studio --help
-          env -u PYTHONPATH /tmp/varia-f3a-r2-base/bin/csv-analyzer --help
-          env -u PYTHONPATH xvfb-run -a /tmp/varia-f3a-r2-base/bin/python - <<'PY' \
+          cd /tmp/varia-f3a-r3-runtime
+          env -u PYTHONPATH /tmp/varia-f3a-r3-base/bin/varia-studio --help
+          env -u PYTHONPATH /tmp/varia-f3a-r3-base/bin/csv-analyzer --help
+          env -u PYTHONPATH xvfb-run -a /tmp/varia-f3a-r3-base/bin/python - <<'PY' \
             | tee "$GITHUB_WORKSPACE/dist/base-ctk-smoke.txt"
           from csv_analyzer.app import Application
           app = Application()
@@ -171,12 +171,12 @@ jobs:
         run: |
           set -euxo pipefail
           WHEEL="$(readlink -f "$(ls dist/*.whl)")"
-          python -m venv /tmp/varia-f3a-r2-qt
-          /tmp/varia-f3a-r2-qt/bin/python -m pip install --upgrade pip
-          /tmp/varia-f3a-r2-qt/bin/pip install \
+          python -m venv /tmp/varia-f3a-r3-qt
+          /tmp/varia-f3a-r3-qt/bin/python -m pip install --upgrade pip
+          /tmp/varia-f3a-r3-qt/bin/pip install \
             -c "$GITHUB_WORKSPACE/constraints-python312.txt" "${WHEEL}[qt]"
-          /tmp/varia-f3a-r2-qt/bin/pip check
-          /tmp/varia-f3a-r2-qt/bin/python - <<'PY' | tee dist/qt-environment.txt
+          /tmp/varia-f3a-r3-qt/bin/pip check
+          /tmp/varia-f3a-r3-qt/bin/python - <<'PY' | tee dist/qt-environment.txt
           import PySide6
           print("pyside6=" + PySide6.__version__)
           PY
@@ -185,16 +185,16 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          cd /tmp/varia-f3a-r2-runtime
-          env -u PYTHONPATH /tmp/varia-f3a-r2-qt/bin/varia-studio-qt --help
-          env -u PYTHONPATH /tmp/varia-f3a-r2-qt/bin/python -m csv_analyzer.qt_app --help
+          cd /tmp/varia-f3a-r3-runtime
+          env -u PYTHONPATH /tmp/varia-f3a-r3-qt/bin/varia-studio-qt --help
+          env -u PYTHONPATH /tmp/varia-f3a-r3-qt/bin/python -m csv_analyzer.qt_app --help
           cat > smoke.csv <<'EOF'
           x,y
           1,2
           3,4
           EOF
           env -u PYTHONPATH QT_QPA_PLATFORM=offscreen \
-            /tmp/varia-f3a-r2-qt/bin/python - <<'PY' | tee "$GITHUB_WORKSPACE/dist/qt-smoke.txt"
+            /tmp/varia-f3a-r3-qt/bin/python - <<'PY' | tee "$GITHUB_WORKSPACE/dist/qt-smoke.txt"
           from pathlib import Path
           from PySide6.QtCore import QEventLoop, QTimer
           from csv_analyzer.qt_app.bootstrap import create_application
@@ -240,14 +240,21 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          cd /tmp/varia-f3a-r2-runtime
+          cd /tmp/varia-f3a-r3-runtime
           : > "$GITHUB_WORKSPACE/dist/close-offscreen.txt"
           for action in quit window; do
             for worker in none cooperative noncancelable; do
               env -u PYTHONPATH QT_QPA_PLATFORM=offscreen \
-                timeout 15s /tmp/varia-f3a-r2-qt/bin/python \
+                timeout 15s /tmp/varia-f3a-r3-qt/bin/python \
                 "$GITHUB_WORKSPACE/tools/f3a_qt_close_probe.py" \
                 --action "$action" --worker "$worker" \
+                | tee -a "$GITHUB_WORKSPACE/dist/close-offscreen.txt"
+            done
+            for worker in none noncancelable; do
+              env -u PYTHONPATH QT_QPA_PLATFORM=offscreen \
+                timeout 15s /tmp/varia-f3a-r3-qt/bin/python \
+                "$GITHUB_WORKSPACE/tools/f3a_qt_close_probe.py" \
+                --action "$action" --worker "$worker" --broken-logging \
                 | tee -a "$GITHUB_WORKSPACE/dist/close-offscreen.txt"
             done
           done
@@ -258,33 +265,40 @@ jobs:
           QT_QPA_PLATFORM: xcb
         run: |
           set -euxo pipefail
-          cd /tmp/varia-f3a-r2-runtime
+          cd /tmp/varia-f3a-r3-runtime
           : > "$GITHUB_WORKSPACE/dist/close-xvfb.txt"
           for action in quit window; do
             for worker in none cooperative noncancelable; do
               env -u PYTHONPATH timeout 15s xvfb-run -a \
-                /tmp/varia-f3a-r2-qt/bin/python \
+                /tmp/varia-f3a-r3-qt/bin/python \
                 "$GITHUB_WORKSPACE/tools/f3a_qt_close_probe.py" \
                 --action "$action" --worker "$worker" \
                 | tee -a "$GITHUB_WORKSPACE/dist/close-xvfb.txt"
             done
+            for worker in none noncancelable; do
+              env -u PYTHONPATH timeout 15s xvfb-run -a \
+                /tmp/varia-f3a-r3-qt/bin/python \
+                "$GITHUB_WORKSPACE/tools/f3a_qt_close_probe.py" \
+                --action "$action" --worker "$worker" --broken-logging \
+                | tee -a "$GITHUB_WORKSPACE/dist/close-xvfb.txt"
+            done
           done
 
-      - name: Record R2 environment
+      - name: Record R3 environment
         shell: bash
         run: |
           {
             echo "commit=$(git rev-parse HEAD)"
             echo "tree=$(git rev-parse HEAD^{tree})"
-            echo "r2_parent=f9bfe85c6718c92b5c41aad3129db3f77b68391e"
+            echo "r3_parent=35685c5e147039ddf813bfbf01e7668ba695fc85"
             echo "python=$(python --version 2>&1)"
             echo "dev_pyside6=$(python -c 'import PySide6; print(PySide6.__version__)')"
-            echo "qt_venv_pyside6=$(/tmp/varia-f3a-r2-qt/bin/python -c 'import PySide6; print(PySide6.__version__)')"
+            echo "qt_venv_pyside6=$(/tmp/varia-f3a-r3-qt/bin/python -c 'import PySide6; print(PySide6.__version__)')"
           } | tee dist/r2-environment.txt
 
       - uses: actions/upload-artifact@v4
         with:
-          name: f3-a-r2-evidence
+          name: f3-a-r3-evidence
           path: |
             dist/*
           if-no-files-found: error

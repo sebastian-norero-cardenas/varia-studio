@@ -98,8 +98,45 @@ Task logging uses compact Python logging messages rather than a telemetry
 framework. DEBUG events include task identity (key, generation, application
 epoch, dataset revision and selection revision), admission, cancellation,
 physical completion, outcome receipt/publication/discard and elapsed time.
-Worker and callback failures retain technical tracebacks at ERROR level.
+R3 supersedes the former raw-traceback policy: technical logs keep structural
+exception metadata only and never log exception messages or raw traceback text.
 
 The development extra uses `tomli` only on Python <3.11 so metadata tests remain
 compatible with the declared Python 3.10 floor without adding a runtime
 dependency.
+
+
+## R3 logging, physical exclusivity and callback lifetime
+
+Observability is best-effort and outside the functional correctness boundary.
+Every Qt-foundation log call goes through a no-throw helper. A broken logging
+handler cannot prevent outcome delivery, scheduler cleanup, publication or
+shutdown. Error logs contain event/task identity, status/timing and structural
+exception metadata such as exception class, cause class, function and line.
+They do not include `str(exception)`, `repr(exception)`, raw traceback text,
+dataset values or full dataset paths. User-facing domain errors remain separate
+and may retain their appropriate UX message.
+
+Outcome availability no longer releases physical scheduler ownership. A
+runnable emits its outcome first and a separate physical-finished signal only
+after the post-outcome worker tail. The scheduler keeps the request in
+`_active` until that second signal is handled on a later GUI event turn.
+Exclusive groups additionally use a per-group lock held for the entire runnable
+body, so a replacement LOAD cannot enter its loader body while the previous
+LOAD still owns the runnable tail. The global pool remains at two workers and
+unrelated work may still use the other worker.
+
+When `submit_task()` receives a bound QObject method and no explicit
+`receiver`, the coordinator infers that QObject as the receiver for that
+specific success or failure callback. Success and failure callbacks may belong
+to different QObjects; each callback has an independent inferred lifetime gate
+and only the callback selected by the outcome is checked. An explicit
+`receiver` retains the existing behavior and overrides inference for both
+callbacks. Ordinary Python callables require no receiver. A closure that merely
+captures a QObject cannot be inferred reliably; callers must pass
+`receiver=<that QObject>` explicitly when publication must depend on its
+lifetime.
+
+State snapshots are shallowly immutable. Dataset/DataFrame objects are shared by
+reference and consumers have a read-only contract; future derived-data work
+must prove that it does not mutate those shared objects.
