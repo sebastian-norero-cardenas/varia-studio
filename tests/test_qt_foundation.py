@@ -853,7 +853,7 @@ class CoordinatorContractTests(unittest.TestCase):
                 )
             )
             coordinator.load_path(b)
-            self.assertTrue(entered_b.wait(timeout=2))
+            pump_until(lambda: entered_b.is_set(), timeout_ms=2000)
             coordinator.load_path(c)
             self.assertFalse(started_c.is_set())
             self.assertEqual(coordinator.runner.activity.physical, 1)
