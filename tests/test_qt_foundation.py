@@ -309,9 +309,7 @@ class CoordinatorContractTests(unittest.TestCase):
         shell.show()
         APP.processEvents()
         shell.close()
-        pump_until(
-            lambda: coordinator.lifecycle is Lifecycle.CLOSED and not shell.isVisible()
-        )
+        pump_until(lambda: coordinator.lifecycle is Lifecycle.CLOSED and not shell.isVisible())
 
         shell.deleteLater()
         coordinator.deleteLater()
@@ -394,9 +392,7 @@ class CoordinatorContractTests(unittest.TestCase):
         pump_until(lambda: seen == [2])
 
         shell.close()
-        pump_until(
-            lambda: coordinator.lifecycle is Lifecycle.CLOSED and not shell.isVisible()
-        )
+        pump_until(lambda: coordinator.lifecycle is Lifecycle.CLOSED and not shell.isVisible())
 
     def test_cancel_and_late_result_never_publish(self):
         coordinator, shell = self.make(max_workers=1)
