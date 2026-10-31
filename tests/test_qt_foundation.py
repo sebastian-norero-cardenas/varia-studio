@@ -342,9 +342,11 @@ class RunnerContractTests(unittest.TestCase):
             selection_revision=3,
         )
         runner.outcome_ready.connect(
-            lambda outcome: seen.append(outcome.value)
-            if outcome.token.key == "after-diagnostic-failure"
-            else None
+            lambda outcome: (
+                seen.append(outcome.value)
+                if outcome.token.key == "after-diagnostic-failure"
+                else None
+            )
         )
         pump_until(lambda: seen == ["next"])
         pump_until(lambda: runner.activity.physical == 0)
