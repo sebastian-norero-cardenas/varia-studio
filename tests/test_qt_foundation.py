@@ -18,7 +18,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import numpy as np
 import shiboken6
-from PySide6.QtCore import QEventLoop, QObject, QTimer, Qt
+from PySide6.QtCore import QEventLoop, QObject, Qt, QTimer
 from PySide6.QtWidgets import QApplication, QLabel
 
 from csv_analyzer.data import CancelledError, load_dataset
