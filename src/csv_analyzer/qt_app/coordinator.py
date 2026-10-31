@@ -16,6 +16,7 @@ from PySide6.QtWidgets import QFileDialog
 
 from ..data import CancelledError, Dataset, ImportOptions, load_dataset
 from ..state import AppState
+from .diagnostics import best_effort_log, safe_error_fields
 from .errors import user_error_text
 from .shell import QtShell
 from .tasks import (
@@ -59,12 +60,37 @@ def _resolve_callback(callback: StoredCallback) -> Callback | None:
     return callback
 
 
+def _inferred_qobject_receiver(
+    callback: Callback | None,
+) -> weakref.ReferenceType[QObject] | None:
+    owner = getattr(callback, "__self__", None)
+    if isinstance(owner, QObject):
+        return weakref.ref(owner)
+    return None
+
+
+@dataclass
+class _CallbackBinding:
+    callback: StoredCallback
+    receiver: weakref.ReferenceType[QObject] | None
+
+
 @dataclass
 class _Publication:
     token: TaskToken
-    success: StoredCallback
-    failure: StoredCallback
-    receiver: weakref.ReferenceType[QObject] | None
+    success: _CallbackBinding
+    failure: _CallbackBinding
+
+
+def _bind_callback(
+    callback: Callback | None,
+    explicit_receiver: QObject | None,
+) -> _CallbackBinding:
+    if explicit_receiver is not None:
+        target = weakref.ref(explicit_receiver)
+    else:
+        target = _inferred_qobject_receiver(callback)
+    return _CallbackBinding(_store_callback(callback), target)
 
 
 class QtCoordinator(QObject):
@@ -141,12 +167,10 @@ class QtCoordinator(QObject):
             self._present_error(error)
             return None
 
-        target = weakref.ref(receiver) if receiver is not None else None
         self._publications[key] = _Publication(
             token,
-            _store_callback(success),
-            _store_callback(failure),
-            target,
+            _bind_callback(success, receiver),
+            _bind_callback(failure, receiver),
         )
         return token
 
@@ -249,11 +273,30 @@ class QtCoordinator(QObject):
             return "selection_revision"
         if token.load_ticket is not None and token.load_ticket != self.state.load_ticket:
             return "load_ticket"
-        if publication.receiver is not None:
-            receiver = publication.receiver()
-            if receiver is None or not shiboken6.isValid(receiver):
-                return "receiver_destroyed"
         return None
+
+    @staticmethod
+    def _binding_rejection_reason(binding: _CallbackBinding) -> str | None:
+        if binding.receiver is None:
+            return None
+        receiver = binding.receiver()
+        if receiver is None or not shiboken6.isValid(receiver):
+            return "receiver_destroyed"
+        return None
+
+    @staticmethod
+    def _log_outcome_discard(token: TaskToken, reason: str) -> None:
+        best_effort_log(
+            logger,
+            logging.DEBUG,
+            "task_outcome_discarded",
+            reason=reason,
+            key=token.key,
+            generation=token.generation,
+            application_epoch=token.application_epoch,
+            dataset_revision=token.dataset_revision,
+            selection_revision=token.selection_revision,
+        )
 
     @Slot(object)
     def _on_outcome(self, outcome: TaskOutcome) -> None:
@@ -263,73 +306,56 @@ class QtCoordinator(QObject):
         token = outcome.token
         publication = self._publications.get(token.key)
         if publication is None:
-            logger.debug(
-                "event=task_outcome_discarded reason=no_publication key=%s generation=%d "
-                "application_epoch=%d dataset_revision=%d selection_revision=%d",
-                token.key,
-                token.generation,
-                token.application_epoch,
-                token.dataset_revision,
-                token.selection_revision,
-            )
+            self._log_outcome_discard(token, "no_publication")
             return
 
         rejection_reason = self._publication_rejection_reason(publication, outcome)
         if publication.token == token:
             self._publications.pop(token.key, None)
         if rejection_reason is not None:
-            logger.debug(
-                "event=task_outcome_discarded reason=%s key=%s generation=%d "
-                "application_epoch=%d dataset_revision=%d selection_revision=%d",
-                rejection_reason,
-                token.key,
-                token.generation,
-                token.application_epoch,
-                token.dataset_revision,
-                token.selection_revision,
-            )
+            self._log_outcome_discard(token, rejection_reason)
             return
 
         if outcome.status is TaskStatus.CANCELLED:
-            logger.debug(
-                "event=task_outcome_discarded reason=cancelled key=%s generation=%d "
-                "application_epoch=%d dataset_revision=%d selection_revision=%d",
-                token.key,
-                token.generation,
-                token.application_epoch,
-                token.dataset_revision,
-                token.selection_revision,
-            )
+            self._log_outcome_discard(token, "cancelled")
             return
-        stored_callback = (
-            publication.failure if outcome.status is TaskStatus.ERROR else publication.success
-        )
-        callback = _resolve_callback(stored_callback)
+
+        binding = publication.failure if outcome.status is TaskStatus.ERROR else publication.success
+        binding_reason = self._binding_rejection_reason(binding)
+        if binding_reason is not None:
+            self._log_outcome_discard(token, binding_reason)
+            return
+
+        callback = _resolve_callback(binding.callback)
         if callback is None:
             if outcome.status is TaskStatus.ERROR and outcome.error is not None:
                 self._present_error(outcome.error)
             return
+
         try:
             if outcome.status is TaskStatus.ERROR:
                 callback(outcome.error or RuntimeError("Worker failed without an error."))
             else:
                 callback(outcome.value)
-            logger.debug(
-                "event=task_outcome_published key=%s generation=%d application_epoch=%d "
-                "dataset_revision=%d selection_revision=%d status=%s",
-                token.key,
-                token.generation,
-                token.application_epoch,
-                token.dataset_revision,
-                token.selection_revision,
-                outcome.status.name,
+            best_effort_log(
+                logger,
+                logging.DEBUG,
+                "task_outcome_published",
+                key=token.key,
+                generation=token.generation,
+                application_epoch=token.application_epoch,
+                dataset_revision=token.dataset_revision,
+                selection_revision=token.selection_revision,
+                status=outcome.status.name,
             )
         except Exception as error:
-            logger.exception(
-                "event=task_callback_error key=%s generation=%d exception_class=%s",
-                token.key,
-                token.generation,
-                type(error).__name__,
+            best_effort_log(
+                logger,
+                logging.ERROR,
+                "task_callback_error",
+                key=token.key,
+                generation=token.generation,
+                **safe_error_fields(error),
             )
             self._present_error(error)
 
@@ -362,11 +388,18 @@ class QtCoordinator(QObject):
         try:
             text = user_error_text(error)
         except Exception as presenter_error:
-            logger.exception(
-                "event=error_presenter_failed stage=format original_exception_class=%s "
-                "presenter_exception_class=%s",
-                type(error).__name__,
-                type(presenter_error).__name__,
+            best_effort_log(
+                logger,
+                logging.ERROR,
+                "error_presenter_failed",
+                stage="format",
+                original_exception_class=type(error).__name__,
+                presenter_exception_class=type(presenter_error).__name__,
+                **{
+                    f"presenter_{key}": value
+                    for key, value in safe_error_fields(presenter_error).items()
+                    if key not in {"exception_class"}
+                },
             )
             return
 
@@ -381,12 +414,18 @@ class QtCoordinator(QObject):
             try:
                 presenter(text)
             except Exception as presenter_error:
-                logger.exception(
-                    "event=error_presenter_failed stage=%s original_exception_class=%s "
-                    "presenter_exception_class=%s",
-                    stage,
-                    type(error).__name__,
-                    type(presenter_error).__name__,
+                best_effort_log(
+                    logger,
+                    logging.ERROR,
+                    "error_presenter_failed",
+                    stage=stage,
+                    original_exception_class=type(error).__name__,
+                    presenter_exception_class=type(presenter_error).__name__,
+                    **{
+                        f"presenter_{key}": value
+                        for key, value in safe_error_fields(presenter_error).items()
+                        if key not in {"exception_class"}
+                    },
                 )
 
     def _finalize_close(self) -> None:

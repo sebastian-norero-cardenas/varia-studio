@@ -1,8 +1,9 @@
-"""Real Qt-shell close probe used by F3.A-R2 QA gates."""
+"""Real Qt-shell close probe used by F3.A QA gates."""
 
 from __future__ import annotations
 
 import argparse
+import logging
 import threading
 
 from PySide6.QtCore import QTimer
@@ -13,6 +14,11 @@ from csv_analyzer.qt_app.coordinator import Lifecycle, QtCoordinator
 from csv_analyzer.qt_app.shell import QtShell
 
 
+class _BrokenHandler(logging.Handler):
+    def emit(self, record) -> None:
+        raise RuntimeError("qa-broken-log-sink")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("--action", choices=("quit", "window"), required=True)
@@ -21,13 +27,21 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("none", "cooperative", "noncancelable"),
         required=True,
     )
+    parser.add_argument("--broken-logging", action="store_true")
     return parser
 
 
 def main() -> int:
     args = build_parser().parse_args()
-    app = QApplication(["varia-f3a-r2-close-probe"])
+    app = QApplication(["varia-f3a-close-probe"])
     app.setQuitOnLastWindowClosed(True)
+
+    qt_logger = logging.getLogger("csv_analyzer.qt_app")
+    broken_handler = None
+    if args.broken_logging:
+        broken_handler = _BrokenHandler()
+        qt_logger.addHandler(broken_handler)
+        qt_logger.setLevel(logging.DEBUG)
 
     shell = QtShell()
     coordinator = QtCoordinator(shell, max_workers=1)
@@ -96,14 +110,17 @@ def main() -> int:
     if published:
         raise RuntimeError(f"late publication escaped closing gate: {published!r}")
 
-    # Lifecycle close is idempotent after the real event loop has exited.
     coordinator.begin_close()
     coordinator.begin_close()
     if coordinator.lifecycle is not Lifecycle.CLOSED:
         raise RuntimeError("idempotent close changed lifecycle")
 
+    if broken_handler is not None:
+        qt_logger.removeHandler(broken_handler)
+
     print(f"action={args.action}")
     print(f"worker={args.worker}")
+    print(f"broken_logging={str(args.broken_logging).lower()}")
     print("lifecycle=CLOSED")
     print("window_closed=true")
     print("late_publications=0")
