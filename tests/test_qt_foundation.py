@@ -184,8 +184,9 @@ class RunnerContractTests(unittest.TestCase):
     def _cleanup_runner(self, runner):
         if not runner.closing:
             runner.begin_closing()
-        if runner.activity.physical == 0:
-            runner.finalize()
+        if runner.activity.physical:
+            pump_until(lambda: runner.activity.physical == 0)
+        runner.finalize()
 
     def test_success_and_error_outcomes(self):
         runner = self.make_runner()
@@ -231,6 +232,7 @@ class RunnerContractTests(unittest.TestCase):
                 selection_revision=13,
             )
             pump_until(lambda: len(outcomes) == 1)
+            pump_until(lambda: runner.activity.physical == 0)
 
         log_text = "\n".join(captured.output)
         identity = (

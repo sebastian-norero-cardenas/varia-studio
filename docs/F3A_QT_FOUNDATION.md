@@ -9,7 +9,7 @@ CustomTkinter application. The canonical `varia-studio` and compatibility
 
 - `AppState` remains the single committed dataset store.
 - `QtCoordinator` owns publication policy and lifecycle.
-- `QtTaskRunner` owns one private `QThreadPool` with two worker threads.
+- `QtTaskRunner` owns one private two-worker `ThreadPoolExecutor`; Qt signals remain the GUI-thread publication boundary.
 - The runner queue is application-managed and bounded to eight pending requests.
 - Workers receive only a callable, cancellation Event and immutable revision
   metadata. They never receive live `AppState`, widgets or view callbacks.
@@ -131,8 +131,8 @@ When `submit_task()` receives a bound QObject method and no explicit
 specific success or failure callback. Success and failure callbacks may belong
 to different QObjects; each callback has an independent inferred lifetime gate
 and only the callback selected by the outcome is checked. An explicit
-`receiver` retains the existing behavior and overrides inference for both
-callbacks. Ordinary Python callables require no receiver. A closure that merely
+`receiver` is an additional lifetime gate; it never replaces the inferred
+owner gate of a bound QObject method. Ordinary Python callables require no receiver. A closure that merely
 captures a QObject cannot be inferred reliably; callers must pass
 `receiver=<that QObject>` explicitly when publication must depend on its
 lifetime.
@@ -140,3 +140,35 @@ lifetime.
 State snapshots are shallowly immutable. Dataset/DataFrame objects are shared by
 reference and consumers have a read-only contract; future derived-data work
 must prove that it does not mutate those shared objects.
+
+
+## R4 diagnostic boundary, physical return and callback gates
+
+R4 makes exception metadata preparation itself best-effort. Structural error
+introspection and the logging call now execute inside a no-throw boundary that
+catches diagnostic failures without replacing the functional exception.
+Messages, raw tracebacks, paths and dataset payloads remain excluded from
+technical logs.
+
+R4 removes the R3 assumption that a signal emitted inside a QRunnable, plus a
+queued GUI turn, proves physical return. The bounded scheduler keeps two worker
+slots and eight application-pending requests but uses a private
+`ThreadPoolExecutor` so each submitted request has a standard-library Future.
+Outcome publication may happen before the callable returns; scheduler ownership
+remains in `_active` until that request's Future is done. The historical
+`physical_finished` bridge signal is retained only as a pre-return adversarial
+checkpoint and is never used to release ownership. Consequently a replacement
+LOAD stays in the application queue while its predecessor is physically owned,
+and unrelated work can use the second worker instead of being trapped behind an
+exclusive-group lock.
+
+A bound QObject callback now has two independent lifetime gates when
+`receiver=` is supplied: its real QObject owner and the explicit receiver.
+Both must be alive for the selected callback to run. Success and failure
+bindings keep independent owner gates, and only the callback selected by the
+outcome is evaluated. Bound Python methods that are not QObjects continue to
+use normal weak-method semantics. Closures that merely capture a QObject remain
+non-inferable and must pass `receiver=` explicitly.
+
+State snapshots remain shallowly immutable: Dataset/DataFrame objects are
+shared by reference and consumers retain the read-only contract.

@@ -6,14 +6,15 @@ import logging
 import threading
 import time
 from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Any, Callable
 
-from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, Signal, Slot
+from PySide6.QtCore import QObject, Qt, Signal, Slot
 
 from ..data import CancelledError
-from .diagnostics import best_effort_log, safe_error_fields
+from .diagnostics import best_effort_exception_log, best_effort_log
 
 logger = logging.getLogger(__name__)
 
@@ -85,31 +86,22 @@ def _token_fields(token: TaskToken) -> dict[str, Any]:
 
 class _Bridge(QObject):
     outcome = Signal(object)
+    # R3 emitted this signal before QRunnable.run() returned. R4 retains the
+    # checkpoint only for adversarial probes; it is not physical ownership truth.
     physical_finished = Signal(object)
+    runnable_returned = Signal(object)
 
 
-class _Runnable(QRunnable):
+class _Runnable:
     def __init__(
         self,
         request: _Request,
         bridge: _Bridge,
-        exclusive_lock: threading.Lock | None,
     ) -> None:
-        super().__init__()
         self.request = request
         self.bridge = bridge
-        self.exclusive_lock = exclusive_lock
-        self.setAutoDelete(True)
 
-    @Slot()
     def run(self) -> None:
-        if self.exclusive_lock is None:
-            self._run_owned()
-            return
-        with self.exclusive_lock:
-            self._run_owned()
-
-    def _run_owned(self) -> None:
         status = TaskStatus.SUCCESS
         value = None
         error: BaseException | None = None
@@ -130,12 +122,12 @@ class _Runnable(QRunnable):
 
         elapsed_ms = (time.perf_counter_ns() - started_ns) / 1_000_000
         if status is TaskStatus.ERROR and error is not None:
-            best_effort_log(
+            best_effort_exception_log(
                 logger,
                 logging.ERROR,
                 "task_worker_error",
+                error,
                 **_token_fields(self.request.token),
-                **safe_error_fields(error),
                 elapsed_ms=f"{elapsed_ms:.3f}",
             )
 
@@ -148,36 +140,33 @@ class _Runnable(QRunnable):
             elapsed_ms=elapsed_ms,
         )
 
-        # Publication availability and physical completion are deliberately
-        # distinct. A direct signal receiver may extend the worker tail here.
+        # Outcome availability precedes physical ownership release. A direct
+        # receiver may deliberately hold either this signal or the legacy
+        # physical_finished checkpoint to extend the worker tail.
         self.bridge.outcome.emit(outcome)
-
         best_effort_log(
             logger,
             logging.DEBUG,
-            "task_physical_finished",
+            "task_worker_tail_reached",
             **_token_fields(self.request.token),
             status=status.name,
             elapsed_ms=f"{elapsed_ms:.3f}",
-            exception_class=type(error).__name__ if error is not None else "None",
         )
-        # This is the final functional action while the exclusive-group lock is
-        # still owned. The GUI frees scheduler ownership on a later event turn.
         self.bridge.physical_finished.emit(self.request.token)
 
 
 class QtTaskRunner(QObject):
-    """Application-owned scheduler in front of a private QThreadPool.
+    """Application-owned scheduler in front of a private two-worker executor.
 
     Runner bookkeeping is GUI-thread-only. Worker threads receive only their
     work callable and a cancellation Event, then emit a typed TaskOutcome.
+    Physical ownership is released only after the per-request Future is done,
+    which means the worker callable has returned.
     """
 
     outcome_ready = Signal(object)
     activity_changed = Signal(object)
     physical_idle = Signal()
-    _physical_release_requested = Signal(object)
-    _idle_recheck_requested = Signal()
 
     def __init__(
         self,
@@ -194,17 +183,14 @@ class QtTaskRunner(QObject):
 
         self.max_workers = max_workers
         self.max_pending = max_pending
-        self.pool = QThreadPool(self)
-        self.pool.setMaxThreadCount(max_workers)
+        self._executor = ThreadPoolExecutor(
+            max_workers=max_workers,
+            thread_name_prefix="varia-qt",
+        )
         self._bridge = _Bridge(self)
         self._bridge.outcome.connect(self._on_worker_outcome)
-        self._bridge.physical_finished.connect(self._on_worker_physical_finished)
-        self._physical_release_requested.connect(
-            self._complete_physical,
-            Qt.ConnectionType.QueuedConnection,
-        )
-        self._idle_recheck_requested.connect(
-            self._check_physical_idle,
+        self._bridge.runnable_returned.connect(
+            self._on_runnable_returned,
             Qt.ConnectionType.QueuedConnection,
         )
 
@@ -212,7 +198,7 @@ class QtTaskRunner(QObject):
         self._logical: dict[str, int] = {}
         self._queued: OrderedDict[str, _Request] = OrderedDict()
         self._active: dict[tuple[str, int], _Request] = {}
-        self._exclusive_locks: dict[str, threading.Lock] = {}
+        self._futures: dict[tuple[str, int], Any] = {}
         self._accepting = True
         self._closing = False
 
@@ -228,7 +214,7 @@ class QtTaskRunner(QObject):
     def activity(self) -> RunnerActivity:
         return RunnerActivity(
             logical=len(self._logical),
-            physical=max(len(self._active), self.pool.activeThreadCount()),
+            physical=len(self._active),
             queued=len(self._queued),
         )
 
@@ -354,17 +340,15 @@ class QtTaskRunner(QObject):
         self._queued.clear()
         self._emit_activity()
         if not self._active:
-            self._check_physical_idle()
+            self.physical_idle.emit()
 
     def finalize(self) -> None:
-        """Release pool resources after physical activity has reached zero."""
+        """Release executor resources after per-request physical activity is zero."""
         if self.activity.physical:
             raise RuntimeError("Cannot finalize while physical tasks are active.")
         self._accepting = False
         self._closing = True
-        self.pool.clear()
-        if not self.pool.waitForDone(0):
-            raise RuntimeError("QThreadPool still owns unfinished work.")
+        self._executor.shutdown(wait=False, cancel_futures=True)
 
     def _can_start(self, request: _Request) -> bool:
         if len(self._active) >= self.max_workers:
@@ -385,11 +369,14 @@ class QtTaskRunner(QObject):
             physical=len(self._active),
             queued=len(self._queued),
         )
-        group = request.token.exclusive_group
-        lock = None
-        if group is not None:
-            lock = self._exclusive_locks.setdefault(group, threading.Lock())
-        self.pool.start(_Runnable(request, self._bridge, lock))
+        runnable = _Runnable(request, self._bridge)
+        future = self._executor.submit(runnable.run)
+        self._futures[key] = future
+        bridge = self._bridge
+        token = request.token
+        future.add_done_callback(
+            lambda _future, bridge=bridge, token=token: bridge.runnable_returned.emit(token)
+        )
 
     def _schedule(self) -> None:
         if self._closing:
@@ -408,70 +395,60 @@ class QtTaskRunner(QObject):
     @Slot(object)
     def _on_worker_outcome(self, outcome: TaskOutcome) -> None:
         token = outcome.token
-        best_effort_log(
-            logger,
-            logging.DEBUG,
-            "task_outcome_received",
+        common_fields = {
             **_token_fields(token),
-            status=outcome.status.name,
-            elapsed_ms=f"{outcome.elapsed_ms:.3f}",
-            exception_class=type(outcome.error).__name__ if outcome.error is not None else "None",
-        )
+            "status": outcome.status.name,
+            "elapsed_ms": f"{outcome.elapsed_ms:.3f}",
+        }
+        if outcome.error is None:
+            best_effort_log(
+                logger,
+                logging.DEBUG,
+                "task_outcome_received",
+                **common_fields,
+                exception_class="None",
+            )
+        else:
+            best_effort_exception_log(
+                logger,
+                logging.DEBUG,
+                "task_outcome_received",
+                outcome.error,
+                **common_fields,
+            )
 
-        # Keep _active ownership until the runnable's physical-finished signal.
-        # This preserves exclusive-group occupancy through the worker tail.
+        # Logical publication may complete before the worker callable returns.
+        # _active remains authoritative until the per-request Future is done.
         self.outcome_ready.emit(outcome)
         if self._logical.get(token.key) == token.generation:
             self._logical.pop(token.key, None)
         self._emit_activity()
 
     @Slot(object)
-    def _on_worker_physical_finished(self, token: TaskToken) -> None:
-        best_effort_log(
-            logger,
-            logging.DEBUG,
-            "task_physical_finish_received",
-            **_token_fields(token),
-        )
-        # Cross-thread delivery can occur immediately before QRunnable.run()
-        # returns. Release scheduler ownership on the following GUI event turn.
-        # A queued Qt signal keeps the deferred call tied to this QObject.
-        self._physical_release_requested.emit(token)
-
-    @Slot(object)
-    def _complete_physical(self, token: TaskToken) -> None:
-        request = self._active.pop((token.key, token.generation), None)
+    def _on_runnable_returned(self, token: TaskToken) -> None:
+        key = (token.key, token.generation)
+        request = self._active.pop(key, None)
+        self._futures.pop(key, None)
         if request is None:
             return
         best_effort_log(
             logger,
             logging.DEBUG,
-            "task_physical_released",
+            "task_physical_finished",
             **_token_fields(token),
         )
         self._schedule()
         self._emit_activity()
-        if not self._active:
-            self._check_physical_idle()
-
-    def _check_physical_idle(self) -> None:
-        """Wait cooperatively for QThreadPool to observe runnable return."""
-        if self._active:
-            return
-        if self.pool.activeThreadCount() == 0:
+        if not self._active and self._closing:
             best_effort_log(
                 logger,
                 logging.DEBUG,
-                "task_pool_physical_idle",
+                "task_executor_physical_idle",
                 logical=len(self._logical),
                 physical=0,
                 queued=len(self._queued),
             )
-            self._emit_activity()
-            if self._closing:
-                self.physical_idle.emit()
-            return
-        self._idle_recheck_requested.emit()
+            self.physical_idle.emit()
 
     def _emit_activity(self) -> None:
         self.activity_changed.emit(self.activity)

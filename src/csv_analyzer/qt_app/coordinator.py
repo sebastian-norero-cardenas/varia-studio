@@ -16,7 +16,7 @@ from PySide6.QtWidgets import QFileDialog
 
 from ..data import CancelledError, Dataset, ImportOptions, load_dataset
 from ..state import AppState
-from .diagnostics import best_effort_log, safe_error_fields
+from .diagnostics import best_effort_exception_log, best_effort_log
 from .errors import user_error_text
 from .shell import QtShell
 from .tasks import (
@@ -72,6 +72,7 @@ def _inferred_qobject_receiver(
 @dataclass
 class _CallbackBinding:
     callback: StoredCallback
+    owner: weakref.ReferenceType[QObject] | None
     receiver: weakref.ReferenceType[QObject] | None
 
 
@@ -86,11 +87,9 @@ def _bind_callback(
     callback: Callback | None,
     explicit_receiver: QObject | None,
 ) -> _CallbackBinding:
-    if explicit_receiver is not None:
-        target = weakref.ref(explicit_receiver)
-    else:
-        target = _inferred_qobject_receiver(callback)
-    return _CallbackBinding(_store_callback(callback), target)
+    owner = _inferred_qobject_receiver(callback)
+    receiver = weakref.ref(explicit_receiver) if explicit_receiver is not None else None
+    return _CallbackBinding(_store_callback(callback), owner, receiver)
 
 
 class QtCoordinator(QObject):
@@ -277,11 +276,12 @@ class QtCoordinator(QObject):
 
     @staticmethod
     def _binding_rejection_reason(binding: _CallbackBinding) -> str | None:
-        if binding.receiver is None:
-            return None
-        receiver = binding.receiver()
-        if receiver is None or not shiboken6.isValid(receiver):
-            return "receiver_destroyed"
+        for label, target in (("owner", binding.owner), ("receiver", binding.receiver)):
+            if target is None:
+                continue
+            qobject = target()
+            if qobject is None or not shiboken6.isValid(qobject):
+                return f"{label}_destroyed"
         return None
 
     @staticmethod
@@ -349,13 +349,13 @@ class QtCoordinator(QObject):
                 status=outcome.status.name,
             )
         except Exception as error:
-            best_effort_log(
+            best_effort_exception_log(
                 logger,
                 logging.ERROR,
                 "task_callback_error",
+                error,
                 key=token.key,
                 generation=token.generation,
-                **safe_error_fields(error),
             )
             self._present_error(error)
 
@@ -388,18 +388,13 @@ class QtCoordinator(QObject):
         try:
             text = user_error_text(error)
         except Exception as presenter_error:
-            best_effort_log(
+            best_effort_exception_log(
                 logger,
                 logging.ERROR,
                 "error_presenter_failed",
+                presenter_error,
+                field_prefix="presenter_",
                 stage="format",
-                original_exception_class=type(error).__name__,
-                presenter_exception_class=type(presenter_error).__name__,
-                **{
-                    f"presenter_{key}": value
-                    for key, value in safe_error_fields(presenter_error).items()
-                    if key not in {"exception_class"}
-                },
             )
             return
 
@@ -414,18 +409,13 @@ class QtCoordinator(QObject):
             try:
                 presenter(text)
             except Exception as presenter_error:
-                best_effort_log(
+                best_effort_exception_log(
                     logger,
                     logging.ERROR,
                     "error_presenter_failed",
+                    presenter_error,
+                    field_prefix="presenter_",
                     stage=stage,
-                    original_exception_class=type(error).__name__,
-                    presenter_exception_class=type(presenter_error).__name__,
-                    **{
-                        f"presenter_{key}": value
-                        for key, value in safe_error_fields(presenter_error).items()
-                        if key not in {"exception_class"}
-                    },
                 )
 
     def _finalize_close(self) -> None:
