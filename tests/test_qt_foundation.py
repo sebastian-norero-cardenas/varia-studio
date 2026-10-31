@@ -61,6 +61,13 @@ def pump_until(predicate, timeout_ms=5000):
         raise AssertionError("Qt condition did not become true before timeout")
 
 
+class DiagnosticReadError(ValueError):
+    def __getattribute__(self, name):
+        if name == "__cause__":
+            raise RuntimeError("diagnostic-read-failed")
+        return super().__getattribute__(name)
+
+
 class BrokenLoggingHandler(logging.Handler):
     def emit(self, record):
         raise RuntimeError("qa-broken-log-sink")
@@ -298,6 +305,48 @@ class RunnerContractTests(unittest.TestCase):
         self.assertEqual(runner.activity.logical, 0)
         self.assertEqual(runner.activity.physical, 0)
 
+    def test_diagnostic_metadata_failure_preserves_outcome_cleanup_and_following_work(self):
+        runner = self.make_runner(max_workers=1)
+        outcomes = []
+        runner.outcome_ready.connect(outcomes.append)
+        original = DiagnosticReadError("ORIGINAL_FUNCTIONAL_MESSAGE")
+
+        def fail(cancel):
+            raise original
+
+        runner.submit(
+            "diagnostic-failure",
+            fail,
+            application_epoch=1,
+            dataset_revision=2,
+            selection_revision=3,
+        )
+        pump_until(lambda: len(outcomes) == 1)
+        pump_until(lambda: runner.activity.physical == 0)
+
+        self.assertEqual(outcomes[0].status, TaskStatus.ERROR)
+        self.assertIs(outcomes[0].error, original)
+        self.assertEqual(str(outcomes[0].error), "ORIGINAL_FUNCTIONAL_MESSAGE")
+        self.assertEqual(runner._active, {})
+        self.assertEqual(runner.activity.logical, 0)
+        self.assertEqual(runner.activity.physical, 0)
+
+        seen = []
+        runner.submit(
+            "after-diagnostic-failure",
+            lambda cancel: "next",
+            application_epoch=1,
+            dataset_revision=2,
+            selection_revision=3,
+        )
+        runner.outcome_ready.connect(
+            lambda outcome: seen.append(outcome.value)
+            if outcome.token.key == "after-diagnostic-failure"
+            else None
+        )
+        pump_until(lambda: seen == ["next"])
+        pump_until(lambda: runner.activity.physical == 0)
+
     def test_safe_formatter_omits_private_exception_payloads(self):
         runner = self.make_runner()
         outcomes = []
@@ -395,6 +444,136 @@ class RunnerContractTests(unittest.TestCase):
         pump_until(lambda: runner.activity.physical == 0)
         self.assertEqual([item.token.generation for item in outcomes], [1, 2])
         self.assertEqual([item.value for item in outcomes], ["first", "second"])
+
+    def test_exclusive_load_waits_for_post_physical_finished_tail_and_preserves_unrelated_capacity(
+        self,
+    ):
+        runner = self.make_runner(max_workers=2)
+        tail_entered = threading.Event()
+        tail_release = threading.Event()
+        second_started = threading.Event()
+        unrelated_entered = threading.Event()
+        unrelated_release = threading.Event()
+
+        def hold_first_physical_tail(token):
+            if token.key == "load" and token.generation == 1:
+                tail_entered.set()
+                tail_release.wait(timeout=5)
+
+        runner._bridge.physical_finished.connect(
+            hold_first_physical_tail,
+            Qt.ConnectionType.DirectConnection,
+        )
+
+        runner.submit(
+            "load",
+            lambda cancel: "first",
+            application_epoch=0,
+            dataset_revision=0,
+            selection_revision=0,
+            exclusive_group="load",
+        )
+        self.assertTrue(tail_entered.wait(timeout=2))
+
+        # R3 processed physical_finished here and released scheduler ownership
+        # even though the emitting runnable was still blocked in this tail.
+        APP.processEvents()
+        APP.processEvents()
+
+        runner.submit(
+            "load",
+            lambda cancel: second_started.set() or "second",
+            application_epoch=0,
+            dataset_revision=0,
+            selection_revision=0,
+            exclusive_group="load",
+        )
+
+        def unrelated(cancel):
+            unrelated_entered.set()
+            unrelated_release.wait(timeout=5)
+            return "unrelated"
+
+        runner.submit(
+            "unrelated",
+            unrelated,
+            application_epoch=0,
+            dataset_revision=0,
+            selection_revision=0,
+        )
+
+        unrelated_before_release = unrelated_entered.wait(timeout=0.5)
+        first_still_owned = ("load", 1) in runner._active
+        second_waited = not second_started.is_set()
+
+        unrelated_release.set()
+        tail_release.set()
+        pump_until(lambda: runner.activity.physical == 0)
+
+        self.assertTrue(first_still_owned)
+        self.assertTrue(second_waited)
+        self.assertTrue(unrelated_before_release)
+        self.assertTrue(second_started.is_set())
+        self.assertEqual(runner._active, {})
+        self.assertEqual(runner.activity.physical, 0)
+
+    def test_error_and_cancel_keep_physical_ownership_through_physical_finished_tail(self):
+        for mode in ("error", "cancel"):
+            with self.subTest(mode=mode):
+                runner = self.make_runner(max_workers=1)
+                outcomes = []
+                runner.outcome_ready.connect(outcomes.append)
+                entered = threading.Event()
+                work_release = threading.Event()
+                tail_entered = threading.Event()
+                tail_release = threading.Event()
+
+                def hold_tail(token):
+                    if token.key == mode:
+                        tail_entered.set()
+                        tail_release.wait(timeout=5)
+
+                runner._bridge.physical_finished.connect(
+                    hold_tail,
+                    Qt.ConnectionType.DirectConnection,
+                )
+
+                if mode == "error":
+
+                    def work(cancel):
+                        raise ValueError("expected")
+
+                else:
+
+                    def work(cancel):
+                        entered.set()
+                        work_release.wait(timeout=5)
+                        return "late"
+
+                runner.submit(
+                    mode,
+                    work,
+                    application_epoch=0,
+                    dataset_revision=0,
+                    selection_revision=0,
+                )
+                if mode == "cancel":
+                    self.assertTrue(entered.wait(timeout=2))
+                    runner.cancel(mode)
+                    work_release.set()
+
+                self.assertTrue(tail_entered.wait(timeout=2))
+                APP.processEvents()
+                APP.processEvents()
+                physical_while_tail = runner.activity.physical
+
+                tail_release.set()
+                pump_until(lambda: runner.activity.physical == 0)
+                pump_until(lambda: len(outcomes) == 1)
+
+                self.assertEqual(physical_while_tail, 1)
+                expected = TaskStatus.ERROR if mode == "error" else TaskStatus.CANCELLED
+                self.assertEqual(outcomes[0].status, expected)
 
     def test_closing_waits_for_post_outcome_worker_tail(self):
         runner = self.make_runner(max_workers=2)
@@ -710,6 +889,109 @@ class CoordinatorContractTests(unittest.TestCase):
         )
         pump_until(lambda: seen == [7])
 
+    def test_explicit_receiver_adds_gate_without_replacing_bound_qobject_owner(self):
+        coordinator, shell = self.make(max_workers=1)
+
+        for index, (owner_alive, receiver_alive) in enumerate(
+            ((True, True), (False, True), (True, False), (False, False))
+        ):
+            with self.subTest(owner_alive=owner_alive, receiver_alive=receiver_alive):
+                owner = QLabel("before")
+                receiver = QObject()
+                entered = threading.Event()
+                release = threading.Event()
+
+                def work(cancel):
+                    entered.set()
+                    release.wait(timeout=5)
+                    return "after"
+
+                coordinator.submit_task(
+                    f"owner-receiver-{index}",
+                    work,
+                    success=owner.setText,
+                    receiver=receiver,
+                )
+                self.assertTrue(entered.wait(timeout=2))
+
+                if not owner_alive:
+                    shiboken6.delete(owner)
+                    self.assertFalse(shiboken6.isValid(owner))
+                if not receiver_alive:
+                    shiboken6.delete(receiver)
+                    self.assertFalse(shiboken6.isValid(receiver))
+
+                before_errors = list(shell.errors)
+                release.set()
+                pump_until(lambda: coordinator.runner.activity.physical == 0)
+
+                self.assertEqual(shell.errors, before_errors)
+                if owner_alive and receiver_alive:
+                    self.assertEqual(owner.text(), "after")
+                elif owner_alive:
+                    self.assertEqual(owner.text(), "before")
+
+    def test_explicit_receiver_keeps_selected_success_and_failure_owner_independent(self):
+        coordinator, shell = self.make()
+        explicit_receiver = QObject()
+
+        class Owner(QObject):
+            def __init__(self):
+                super().__init__()
+                self.values = []
+
+            def handle(self, value):
+                self.values.append(value)
+
+        success_owner = Owner()
+        dead_failure_owner = Owner()
+        coordinator.submit_task(
+            "selected-success-owner",
+            lambda cancel: "ok",
+            success=success_owner.handle,
+            failure=dead_failure_owner.handle,
+            receiver=explicit_receiver,
+        )
+        shiboken6.delete(dead_failure_owner)
+        pump_until(lambda: success_owner.values == ["ok"])
+
+        dead_success_owner = Owner()
+        failure_owner = Owner()
+
+        def fail(cancel):
+            raise ValueError("expected")
+
+        coordinator.submit_task(
+            "selected-failure-owner",
+            fail,
+            success=dead_success_owner.handle,
+            failure=failure_owner.handle,
+            receiver=explicit_receiver,
+        )
+        shiboken6.delete(dead_success_owner)
+        pump_until(lambda: len(failure_owner.values) == 1)
+        self.assertIsInstance(failure_owner.values[0], ValueError)
+        self.assertEqual(shell.errors, [])
+
+    def test_bound_python_method_without_qobject_still_works(self):
+        coordinator, shell = self.make()
+
+        class PythonOwner:
+            def __init__(self):
+                self.values = []
+
+            def handle(self, value):
+                self.values.append(value)
+
+        owner = PythonOwner()
+        coordinator.submit_task(
+            "python-bound-method",
+            lambda cancel: 9,
+            success=owner.handle,
+        )
+        pump_until(lambda: owner.values == [9])
+        self.assertEqual(shell.errors, [])
+
     def test_success_and_failure_qobjects_have_independent_inferred_receivers(self):
         coordinator, shell = self.make()
         success_label = QLabel("before")
@@ -917,7 +1199,7 @@ class CoordinatorContractTests(unittest.TestCase):
 
 
 class ShellCloseProbeTests(unittest.TestCase):
-    def run_probe(self, action, worker, *, broken_logging=False):
+    def run_probe(self, action, worker, *, broken_logging=False, timeout=10):
         command = [
             sys.executable,
             str(ROOT / "tools" / "f3a_qt_close_probe.py"),
@@ -934,7 +1216,7 @@ class ShellCloseProbeTests(unittest.TestCase):
             text=True,
             capture_output=True,
             check=False,
-            timeout=10,
+            timeout=timeout,
             env={**os.environ, "QT_QPA_PLATFORM": "offscreen"},
         )
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -946,6 +1228,11 @@ class ShellCloseProbeTests(unittest.TestCase):
             f"broken_logging={str(broken_logging).lower()}",
             result.stdout,
         )
+
+    def test_diagnostic_metadata_failure_cannot_block_real_quit_or_window_close(self):
+        for action in ("quit", "window"):
+            with self.subTest(action=action):
+                self.run_probe(action, "diagnostic", timeout=3)
 
     def test_broken_logging_cannot_block_real_quit_or_window_close(self):
         for action in ("quit", "window"):

@@ -14,6 +14,13 @@ from csv_analyzer.qt_app.coordinator import Lifecycle, QtCoordinator
 from csv_analyzer.qt_app.shell import QtShell
 
 
+class _DiagnosticReadError(ValueError):
+    def __getattribute__(self, name):
+        if name == "__cause__":
+            raise RuntimeError("diagnostic-read-failed")
+        return super().__getattribute__(name)
+
+
 class _BrokenHandler(logging.Handler):
     def emit(self, record) -> None:
         raise RuntimeError("qa-broken-log-sink")
@@ -24,7 +31,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--action", choices=("quit", "window"), required=True)
     parser.add_argument(
         "--worker",
-        choices=("none", "cooperative", "noncancelable"),
+        choices=("none", "cooperative", "noncancelable", "diagnostic"),
         required=True,
     )
     parser.add_argument("--broken-logging", action="store_true")
@@ -80,6 +87,14 @@ def main() -> int:
 
         threading.Thread(target=release_after_cancel, daemon=True).start()
         coordinator.submit_task("close-probe", work, success=published.append)
+
+    elif args.worker == "diagnostic":
+
+        def work(cancel):
+            entered.set()
+            raise _DiagnosticReadError("ORIGINAL_FUNCTIONAL_MESSAGE")
+
+        coordinator.submit_task("close-probe", work, failure=lambda error: None)
 
     def request_close() -> None:
         if args.action == "quit":
