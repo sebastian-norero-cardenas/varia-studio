@@ -2,6 +2,8 @@
 
 ## F3.A Qt Foundation — final integration evidence
 
+Date: 2026-11-03.
+
 Final integrated code identity:
 
 `6c1514abd2777cc5705fff4bfa65ba06a4a2a4e0`
@@ -29,7 +31,9 @@ Residuals carried forward:
 - DPI/Wayland behavior, release hardening and broader performance work remain
   outside F3.A and are deferred.
 
-Date: 2026-09-19. Environment: Linux x86_64, CPython 3.12.14, Tk 8.6,
+## Historical validation record — 2026-09-19
+
+Environment: Linux x86_64, CPython 3.12.14, Tk 8.6,
 CustomTkinter 5.2.2, pandas 2.2.3, NumPy 2.3.5, Matplotlib 3.10.8.
 The exact Python dependency snapshot is `constraints-python312.txt`.
 
