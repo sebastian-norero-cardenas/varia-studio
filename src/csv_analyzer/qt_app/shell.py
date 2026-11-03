@@ -14,6 +14,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .table_view import TableView
+
 
 class QtShell(QMainWindow):
     open_requested = Signal()
