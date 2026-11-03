@@ -88,7 +88,7 @@ class TableView(QWidget):
         self.go_edit.setMaximumWidth(180)
         go_row.addWidget(self.go_edit)
         self.go_button = QPushButton("Go")
-        self.go_button.clicked.connect(lambda: self.go_requested.emit(self.go_edit.text()))
+        self.go_button.clicked.connect(lambda _checked=False: self.go_requested.emit(self.go_edit.text()))
         self.go_edit.returnPressed.connect(lambda: self.go_requested.emit(self.go_edit.text()))
         go_row.addWidget(self.go_button)
         self.feedback_label = QLabel("No dataset loaded")
@@ -119,7 +119,7 @@ class TableView(QWidget):
     def set_model(self, model) -> None:
         self.table.setModel(model)
 
-    def _emit_scope(self) -> None:
+    def _emit_scope(self, _index: int | None = None) -> None:
         scope = self.scope_combo.currentData()
         if scope is not None:
             self.scope_requested.emit(scope)
@@ -197,11 +197,7 @@ class TableView(QWidget):
     def clear_visual_selection(self) -> None:
         selection_model = self.table.selectionModel()
         if selection_model is not None:
-            selection_model.clearSelection()
-            selection_model.setCurrentIndex(
-                self.table.model().index(-1, -1) if self.table.model() is not None else None,
-                QItemSelectionModel.SelectionFlag.NoUpdate,
-            )
+            selection_model.clear()
 
     def capture_selection(self, model) -> tuple[tuple[int, ...], int | None]:
         selection_model = self.table.selectionModel()
