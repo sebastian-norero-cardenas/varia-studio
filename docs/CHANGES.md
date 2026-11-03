@@ -8,6 +8,21 @@
   source layout, module entry point and repository name for compatibility.
 - Historical references below are preserved as records of the earlier CSV Analyzer implementation.
 
+## F3.A — Qt Foundation integrated
+
+- Fast-forwarded the audited F3.A candidate
+  `6c1514abd2777cc5705fff4bfa65ba06a4a2a4e0` into `main` without
+  squash, rebase or merge commit.
+- Added the independent PySide6 foundation while retaining the existing CTk
+  application and entry points during the coexistence phase.
+- Recorded the approved `ARQ-F3A-R4-01` amendment: the final Qt task scheduler
+  is an application-owned bounded `QThread` scheduler, replacing the earlier
+  private-`QThreadPool` design assumption.
+- The final scheduler admits at most two active requests and eight pending
+  requests, and retains per-request physical ownership until `QThread.finished`.
+- F3.A integration is backed by `QA06-F3A-R4-01 = VERIFIED` and
+  `AUD-F3A-01-R2 = GO`.
+
 ## Starting problems
 
 The prototype coupled parsing, widget mutation and plot configuration across large

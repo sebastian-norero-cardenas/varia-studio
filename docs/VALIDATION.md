@@ -1,5 +1,34 @@
 # Verification record
 
+## F3.A Qt Foundation — final integration evidence
+
+Final integrated code identity:
+
+`6c1514abd2777cc5705fff4bfa65ba06a4a2a4e0`
+(tree `ef239c82bd1fc0c1138ca5bafd717c02442ea91a`).
+
+Approval/evidence chain:
+
+- `ARQ-F3A-R4-01 = APPROVE ARCHITECTURE AMENDMENT`.
+- `QA06-F3A-R4-01 = VERIFIED`.
+- `AUD-F3A-01-R2 = GO`.
+- GitHub Actions run `41254367757` completed successfully on the exact
+  integrated SHA, including Python 3.10/3.12 focal suites, historical
+  regression, Ruff, build, base/Qt installs, CTk/Qt smokes, and Quit/X close
+  probes under offscreen and Xvfb.
+
+Residuals carried forward:
+
+- LOW: state snapshots are shallowly immutable; shared Dataset/DataFrame objects
+  remain read-only by contract.
+- LOW tooling: the QA test counter is a tooling/reporting residual, not an
+  application correctness defect.
+- Performance: per-request `QThread` creation/churn and its overhead are
+  intentionally deferred to the performance phase.
+- Legacy Tcl/Tk cleanup remains deferred while CTk coexistence is retained.
+- DPI/Wayland behavior, release hardening and broader performance work remain
+  outside F3.A and are deferred.
+
 Date: 2026-09-19. Environment: Linux x86_64, CPython 3.12.14, Tk 8.6,
 CustomTkinter 5.2.2, pandas 2.2.3, NumPy 2.3.5, Matplotlib 3.10.8.
 The exact Python dependency snapshot is `constraints-python312.txt`.

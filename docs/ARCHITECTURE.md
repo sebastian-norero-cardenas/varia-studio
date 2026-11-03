@@ -59,6 +59,21 @@ the background, but it cannot publish stale state. Tk and Matplotlib creation,
 navigation, drawing and export remain on the main thread because their interactive
 backends are not thread-safe.
 
+### F3.A Qt scheduler amendment
+
+`ARQ-F3A-R4-01` approves the Qt-foundation scheduler as an
+application-owned bounded `QThread` scheduler rather than a private
+`QThreadPool`. Each admitted request owns one `QThread`, with at most two active
+requests and at most eight application-pending requests. `_active` retains
+physical ownership until the corresponding `QThread.finished` notification, so
+`physical == 0` means the request's `run()` has completed and that completion has
+been recognized by the scheduler; it does not claim pthread join/TLS teardown.
+Exclusive load replacement remains application-scheduled, allowing unrelated
+work to use the second worker while a prior load is still physically owned.
+
+This amendment applies to the PySide6 foundation only. The existing Tk/CTk
+worker architecture remains unchanged during the coexistence phase.
+
 ## Import and export choices
 
 The structural scan costs an extra sequential read. It detects ragged input that

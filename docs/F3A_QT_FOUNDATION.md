@@ -22,8 +22,8 @@ before starting another LOAD. Other work may use the second worker.
 
 Closing follows STARTING -> RUNNING -> CLOSING -> CLOSED. CLOSING invalidates
 publication, stops accepting work and requests cancellation, while keeping the
-pool, bridge and runnable objects alive until physical activity reaches zero. No
-indefinite wait is performed on the GUI thread.
+bridge and admitted per-request `QThread` objects alive until physical activity
+reaches zero. No indefinite wait is performed on the GUI thread.
 
 ## Revision domains
 
@@ -106,7 +106,7 @@ compatible with the declared Python 3.10 floor without adding a runtime
 dependency.
 
 
-## R3 logging, physical exclusivity and callback lifetime
+## R3 logging, physical exclusivity and callback lifetime (historical; superseded by R4)
 
 Observability is best-effort and outside the functional correctness boundary.
 Every Qt-foundation log call goes through a no-throw helper. A broken logging
@@ -117,14 +117,13 @@ They do not include `str(exception)`, `repr(exception)`, raw traceback text,
 dataset values or full dataset paths. User-facing domain errors remain separate
 and may retain their appropriate UX message.
 
-Outcome availability no longer releases physical scheduler ownership. A
-runnable emits its outcome first and a separate physical-finished signal only
-after the post-outcome worker tail. The scheduler keeps the request in
-`_active` until that second signal is handled on a later GUI event turn.
-Exclusive groups additionally use a per-group lock held for the entire runnable
-body, so a replacement LOAD cannot enter its loader body while the previous
-LOAD still owns the runnable tail. The global pool remains at two workers and
-unrelated work may still use the other worker.
+R3 introduced a separate physical-finished signal, deferred release and a
+per-group lock to keep logical outcome availability distinct from worker
+ownership. `AUD-F3A-01-R1` showed that this still released ownership before
+the runnable had provably returned and could consume the second worker with a
+replacement LOAD waiting on the lock. Those R3 mechanics are historical and do
+not describe the final scheduler; R4 below supersedes them with per-request
+`QThread.finished` ownership and application-level admission.
 
 When `submit_task()` receives a bound QObject method and no explicit
 `receiver`, the coordinator infers that QObject as the receiver for that
