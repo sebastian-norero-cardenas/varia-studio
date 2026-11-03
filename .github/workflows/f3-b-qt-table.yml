@@ -111,6 +111,15 @@ jobs:
             python -m unittest -v               tests.test_qt_foundation.CoordinatorContractTests.test_load_replacement_waits_for_physical_predecessor
           done
 
+      - name: F3.A full-suite Qt lifetime stability gate
+        shell: bash
+        run: |
+          set -euxo pipefail
+          for iteration in $(seq 1 3); do
+            echo "f3a_full_suite_iteration=$iteration"
+            python -m unittest -v tests.test_qt_foundation
+          done
+
       - name: Historical/core regression under Xvfb
         env:
           QT_QPA_PLATFORM: xcb

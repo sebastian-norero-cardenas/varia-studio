@@ -425,6 +425,18 @@ class QtTableTests(unittest.TestCase):
         self.assertIs(coordinator.state.dataset, active)
         self.assertIs(controller.model.dataset, active)
 
+    def test_close_detaches_table_model_before_qobject_teardown(self):
+        coordinator, shell = self.make()
+        self.commit(coordinator, dataset(pd.DataFrame({"x": [1, 2, 3]})))
+        self.assertIsNotNone(shell.table_view.table.model())
+
+        coordinator.begin_close()
+        pump_until(lambda: coordinator.lifecycle is Lifecycle.CLOSED)
+
+        self.assertIsNone(shell.table_view.table.model())
+        coordinator.table_controller.begin_close()
+        self.assertIsNone(shell.table_view.table.model())
+
     def test_zero_row_and_zero_selected_states(self):
         coordinator, shell = self.make()
         empty = dataset(pd.DataFrame({"x": pd.Series([], dtype="int64")}), "empty.csv")

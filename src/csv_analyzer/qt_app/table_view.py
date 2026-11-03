@@ -119,6 +119,11 @@ class TableView(QWidget):
     def set_model(self, model) -> None:
         self.table.setModel(model)
 
+    def prepare_close(self) -> None:
+        """Stop deferred UI work and detach the cross-owner model safely."""
+        self._search_timer.stop()
+        self.table.setModel(None)
+
     def _emit_scope(self, _index: int | None = None) -> None:
         scope = self.scope_combo.currentData()
         if scope is not None:

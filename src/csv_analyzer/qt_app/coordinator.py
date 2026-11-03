@@ -253,6 +253,7 @@ class QtCoordinator(QObject):
         self.lifecycle = Lifecycle.CLOSING
         self.application_epoch += 1
         self.state.cancel_load()
+        self.table_controller.begin_close()
         self._publications.clear()
         shell = self._shell()
         if shell is not None:

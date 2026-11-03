@@ -55,6 +55,7 @@ class TableController(QObject):
         self._selection_revision = -1
         self._pending_go_source_id: int | None = None
         self._pending_search_first = False
+        self._closing = False
 
         view.scope_requested.connect(self.set_scope)
         view.sort_requested.connect(self.set_sort)
@@ -71,6 +72,13 @@ class TableController(QObject):
     def cancel_derived(self) -> None:
         self._cancel_task("table-order")
         self._cancel_task("table-search")
+
+    def begin_close(self) -> None:
+        if self._closing:
+            return
+        self._closing = True
+        self.cancel_derived()
+        self.view.prepare_close()
 
     def handle_state_change(self, reason: str, snapshot: StateSnapshot) -> None:
         if snapshot.dataset_revision != self._dataset_revision:
