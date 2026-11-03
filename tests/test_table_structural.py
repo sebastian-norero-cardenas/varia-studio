@@ -11,12 +11,16 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import numpy as np
 import pandas as pd
+from PySide6.QtCore import QEventLoop, QTimer
 from PySide6.QtWidgets import QApplication
 
 from csv_analyzer.data import CancelledError, ColumnInfo, Dataset
+from csv_analyzer.qt_app.coordinator import Lifecycle, QtCoordinator
 from csv_analyzer.qt_app.table_model import DataFrameTableModel
+from csv_analyzer.qt_app.shell import QtShell
 from csv_analyzer.qt_app.table_view import TableView
 from csv_analyzer.table import (
+    SearchMode,
     SearchSpec,
     SortDirection,
     SortSpec,
@@ -28,6 +32,35 @@ from csv_analyzer.table import (
 APP = QApplication.instance() or QApplication(["varia-f3b-structural"])
 
 
+def pump_until(predicate, timeout_ms=10000):
+    if predicate():
+        return
+    loop = QEventLoop()
+    poll = QTimer()
+    poll.setInterval(2)
+    timeout = QTimer()
+    timeout.setSingleShot(True)
+    expired = {"value": False}
+
+    def check():
+        if predicate():
+            loop.quit()
+
+    def expire():
+        expired["value"] = True
+        loop.quit()
+
+    poll.timeout.connect(check)
+    timeout.timeout.connect(expire)
+    poll.start()
+    timeout.start(timeout_ms)
+    loop.exec()
+    poll.stop()
+    timeout.stop()
+    if expired["value"] and not predicate():
+        raise AssertionError("Structural Qt condition timed out")
+
+
 class SyntheticTableStructuralTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -36,7 +69,8 @@ class SyntheticTableStructuralTest(unittest.TestCase):
         base = np.arange(cls.rows, dtype=np.int64)
         base[12345] = 9007199254740993
         data["c00"] = base
-        for index in range(1, 61):
+        data["c01"] = np.full(cls.rows, 7_777_777, dtype=np.int64)
+        for index in range(2, 61):
             data[f"c{index:02d}"] = np.arange(cls.rows, dtype=np.int64) + index
         cls.frame = pd.DataFrame(data, copy=False)
         columns = tuple(
@@ -110,6 +144,47 @@ class SyntheticTableStructuralTest(unittest.TestCase):
 
         view.deleteLater()
         model.deleteLater()
+        APP.processEvents()
+
+    def test_synthetic_search_replacement_and_stale_publication_gate(self):
+        shell = QtShell()
+        coordinator = QtCoordinator(shell)
+        coordinator.start()
+        ticket = coordinator.state.begin_load()
+        self.assertTrue(coordinator.state.commit_dataset(ticket, self.dataset))
+        controller = coordinator.table_controller
+
+        controller.set_search("definitely-not-present", SearchMode.EXACT)
+        first_generation = coordinator.runner.current_generation("table-search")
+        self.assertIsNotNone(first_generation)
+
+        controller.set_search("7777777", SearchMode.EXACT)
+        second_generation = coordinator.runner.current_generation("table-search")
+        self.assertIsNotNone(second_generation)
+        self.assertGreater(second_generation, first_generation)
+
+        pump_until(
+            lambda: (
+                controller.search_result is not None
+                and controller.search_spec is not None
+                and controller.search_spec.text == "7777777"
+                and coordinator.runner.activity.physical == 0
+            )
+        )
+        self.assertEqual(controller.search_result.source_ids.size, self.rows)
+        self.assertEqual(controller.search_result.source_ids[0], 1)
+        self.assertEqual(controller.search_result.source_ids[-1], self.rows)
+
+        controller.go_to_source_id(str(self.rows - 1))
+        self.assertEqual(
+            shell.table_view.capture_selection(controller.model)[1],
+            self.rows - 1,
+        )
+
+        coordinator.begin_close()
+        pump_until(lambda: coordinator.lifecycle is Lifecycle.CLOSED)
+        shell.deleteLater()
+        coordinator.deleteLater()
         APP.processEvents()
 
 

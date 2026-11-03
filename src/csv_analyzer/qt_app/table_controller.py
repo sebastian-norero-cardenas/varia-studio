@@ -131,7 +131,10 @@ class TableController(QObject):
         self.scope = scope
         self.view.set_scope(scope)
         self.table_epoch += 1
-        self._request_row_map(snapshot)
+        self._request_row_map(
+            snapshot,
+            recalculate_search=self.search_spec is not None and self.search_result is None,
+        )
 
     def set_sort(self, logical_column: int, direction: SortDirection) -> None:
         snapshot = self._snapshot_provider()
@@ -147,7 +150,10 @@ class TableController(QObject):
         self.sort_spec = SortSpec(column, direction)
         self.view.set_sort_indicator(logical_column, direction)
         self.table_epoch += 1
-        self._request_row_map(snapshot)
+        self._request_row_map(
+            snapshot,
+            recalculate_search=self.search_spec is not None and self.search_result is None,
+        )
 
     def reset_sort(self) -> None:
         if self.model.dataset is None:
@@ -155,7 +161,10 @@ class TableController(QObject):
         self.sort_spec = None
         self.view.reset_sort_indicator()
         self.table_epoch += 1
-        self._request_row_map(self._snapshot_provider())
+        self._request_row_map(
+            self._snapshot_provider(),
+            recalculate_search=self.search_spec is not None and self.search_result is None,
+        )
 
     def _request_row_map(
         self,
@@ -166,7 +175,6 @@ class TableController(QObject):
         dataset = snapshot.dataset
         if dataset is None:
             return
-        preserved_ids, current_id = self.view.capture_selection(self.model)
         epoch = self.table_epoch
         scope = self.scope
         sort_spec = self.sort_spec
@@ -187,8 +195,6 @@ class TableController(QObject):
                 epoch,
                 scope,
                 sort_spec,
-                preserved_ids,
-                current_id,
                 recalculate_search,
             )
             return
@@ -212,8 +218,6 @@ class TableController(QObject):
                 epoch,
                 scope,
                 sort_spec,
-                preserved_ids,
-                current_id,
                 recalculate_search,
             ),
             failure=self._derived_failure,
@@ -227,8 +231,6 @@ class TableController(QObject):
         epoch: int,
         scope: TableScope,
         sort_spec: SortSpec | None,
-        preserved_ids: tuple[int, ...],
-        current_id: int | None,
         recalculate_search: bool,
     ) -> None:
         snapshot = self._snapshot_provider()
@@ -241,6 +243,7 @@ class TableController(QObject):
             or row_map.selection_revision != snapshot.selection_revision
         ):
             return
+        preserved_ids, current_id = self.view.capture_selection(self.model)
         self.model.replace_row_map(row_map)
         self.view.restore_selection(self.model, preserved_ids, current_id)
         self._update_counts_and_empty_state(snapshot)

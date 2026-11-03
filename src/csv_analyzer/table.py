@@ -17,6 +17,7 @@ from pandas.api.types import (
     is_datetime64_any_dtype,
     is_float_dtype,
     is_integer_dtype,
+    is_object_dtype,
     is_string_dtype,
 )
 
@@ -262,7 +263,7 @@ def _sort_key_factory(series: pd.Series):
         return lambda value: float(value)
     if is_datetime64_any_dtype(dtype):
         return lambda value: pd.Timestamp(value).value
-    if is_string_dtype(dtype) and dtype is not object:
+    if is_string_dtype(dtype) and not is_object_dtype(dtype):
         return lambda value: str(value)
     return _mixed_sort_key
 
