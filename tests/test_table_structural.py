@@ -73,9 +73,7 @@ class SyntheticTableStructuralTest(unittest.TestCase):
         for index in range(2, 61):
             data[f"c{index:02d}"] = np.arange(cls.rows, dtype=np.int64) + index
         cls.frame = pd.DataFrame(data, copy=False)
-        columns = tuple(
-            ColumnInfo(name, "int64", "numeric", 0, 0) for name in cls.frame.columns
-        )
+        columns = tuple(ColumnInfo(name, "int64", "numeric", 0, 0) for name in cls.frame.columns)
         cls.dataset = Dataset(cls.frame, Path("S-200K-TABLE.csv"), columns)
 
     def test_structural_contract(self):
@@ -127,10 +125,12 @@ class SyntheticTableStructuralTest(unittest.TestCase):
         self.assertTrue(view.select_source_id(model, 199999))
         self.assertIsNone(view.table.indexWidget(model.index(12345, 1)))
         self.assertLessEqual(len(model._columns), 61)
-        self.assertFalse(any(
-            isinstance(value, np.ndarray) and value.ndim == 2
-            for value in model.__dict__.values()
-        ))
+        self.assertFalse(
+            any(
+                isinstance(value, np.ndarray) and value.ndim == 2
+                for value in model.__dict__.values()
+            )
+        )
 
         cancel = threading.Event()
         cancel.set()

@@ -88,7 +88,9 @@ class TableView(QWidget):
         self.go_edit.setMaximumWidth(180)
         go_row.addWidget(self.go_edit)
         self.go_button = QPushButton("Go")
-        self.go_button.clicked.connect(lambda _checked=False: self.go_requested.emit(self.go_edit.text()))
+        self.go_button.clicked.connect(
+            lambda _checked=False: self.go_requested.emit(self.go_edit.text())
+        )
         self.go_edit.returnPressed.connect(lambda: self.go_requested.emit(self.go_edit.text()))
         go_row.addWidget(self.go_button)
         self.feedback_label = QLabel("No dataset loaded")
@@ -233,8 +235,7 @@ class TableView(QWidget):
             index = model.index(row, 0)
             selection_model.select(
                 index,
-                QItemSelectionModel.SelectionFlag.Select
-                | QItemSelectionModel.SelectionFlag.Rows,
+                QItemSelectionModel.SelectionFlag.Select | QItemSelectionModel.SelectionFlag.Rows,
             )
         if current_source_id is not None:
             row = model.visible_row_for_source_id(current_source_id)
@@ -255,8 +256,7 @@ class TableView(QWidget):
         selection_model.clearSelection()
         selection_model.select(
             index,
-            QItemSelectionModel.SelectionFlag.Select
-            | QItemSelectionModel.SelectionFlag.Rows,
+            QItemSelectionModel.SelectionFlag.Select | QItemSelectionModel.SelectionFlag.Rows,
         )
         selection_model.setCurrentIndex(index, QItemSelectionModel.SelectionFlag.NoUpdate)
         self.table.scrollTo(index, QAbstractItemView.ScrollHint.PositionAtCenter)
@@ -273,7 +273,5 @@ class TableView(QWidget):
         if model is None:
             return []
         return [
-            column
-            for column in range(model.columnCount())
-            if not self.table.isColumnHidden(column)
+            column for column in range(model.columnCount()) if not self.table.isColumnHidden(column)
         ]

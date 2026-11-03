@@ -97,9 +97,8 @@ class TableController(QObject):
             return
 
         row_map = self.model.row_map
-        order_needs_restart = (
-            self.sort_spec is not None
-            and (row_map is None or row_map.sort_spec != self.sort_spec)
+        order_needs_restart = self.sort_spec is not None and (
+            row_map is None or row_map.sort_spec != self.sort_spec
         )
         if order_needs_restart:
             self.table_epoch += 1
@@ -374,7 +373,9 @@ class TableController(QObject):
         rows = self._visible_match_rows()
         if not rows:
             return
-        self.current_match = 0 if self.current_match is None else (self.current_match + 1) % len(rows)
+        self.current_match = (
+            0 if self.current_match is None else (self.current_match + 1) % len(rows)
+        )
         self.view.set_search_status(f"{self.current_match + 1} / {len(rows)}")
         self._navigate_visible_row(rows[self.current_match])
 
@@ -382,7 +383,9 @@ class TableController(QObject):
         rows = self._visible_match_rows()
         if not rows:
             return
-        self.current_match = len(rows) - 1 if self.current_match is None else (self.current_match - 1) % len(rows)
+        self.current_match = (
+            len(rows) - 1 if self.current_match is None else (self.current_match - 1) % len(rows)
+        )
         self.view.set_search_status(f"{self.current_match + 1} / {len(rows)}")
         self._navigate_visible_row(rows[self.current_match])
 

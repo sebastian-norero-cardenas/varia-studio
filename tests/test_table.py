@@ -106,7 +106,9 @@ class SortTests(unittest.TestCase):
     def test_text_bool_category_datetime_and_mixed_are_deterministic(self):
         self.assertEqual(self.sort(pd.Series(["b", "a", "c"])), [1, 0, 2])
         self.assertEqual(self.sort(pd.Series([True, False, True], dtype="bool")), [1, 0, 2])
-        category = pd.Series(pd.Categorical(["medium", "low", "high"], categories=["low", "medium", "high"]))
+        category = pd.Series(
+            pd.Categorical(["medium", "low", "high"], categories=["low", "medium", "high"])
+        )
         self.assertEqual(self.sort(category), [1, 0, 2])
         dates = pd.Series(pd.to_datetime(["2024-02-01", "2023-01-01", None]))
         self.assertEqual(self.sort(dates), [1, 0, 2])
