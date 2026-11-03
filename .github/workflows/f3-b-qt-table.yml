@@ -19,6 +19,7 @@ jobs:
         python-version: ["3.10", "3.12"]
     env:
       QT_QPA_PLATFORM: offscreen
+      PYTHONFAULTHANDLER: "1"
 
     steps:
       - uses: actions/checkout@v4
@@ -62,6 +63,7 @@ jobs:
     timeout-minutes: 55
     env:
       QT_QPA_PLATFORM: offscreen
+      PYTHONFAULTHANDLER: "1"
 
     steps:
       - uses: actions/checkout@v4

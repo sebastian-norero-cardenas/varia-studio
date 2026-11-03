@@ -131,7 +131,7 @@ class QtCoordinator(QObject):
             snapshot_provider=self.snapshot,
             submit_task=self.submit_task,
             cancel_task=self.runner.cancel,
-            parent=self,
+            parent=shell.table_view,
         )
         self.state.subscribe(self._on_state_changed)
 

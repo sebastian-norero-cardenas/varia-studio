@@ -37,9 +37,9 @@ class TableController(QObject):
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
-        self.view = view
+        self.view: TableView | None = view
         self.model = DataFrameTableModel(self)
-        self.view.set_model(self.model)
+        view.set_model(self.model)
         self._snapshot_provider = snapshot_provider
         self._submit_task = submit_task
         self._cancel_task = cancel_task
@@ -78,9 +78,30 @@ class TableController(QObject):
             return
         self._closing = True
         self.cancel_derived()
-        self.view.prepare_close()
+        view = self.view
+        if view is None:
+            return
+        view.prepare_close()
+        for signal, slot in (
+            (view.scope_requested, self.set_scope),
+            (view.sort_requested, self.set_sort),
+            (view.reset_sort_requested, self.reset_sort),
+            (view.search_requested, self.set_search),
+            (view.previous_requested, self.previous_match),
+            (view.next_requested, self.next_match),
+            (view.show_all_requested, self.show_matches_in_all),
+            (view.go_requested, self.go_to_source_id),
+            (view.copy_requested, self.copy_selection),
+        ):
+            try:
+                signal.disconnect(slot)
+            except (RuntimeError, TypeError):
+                pass
+        self.view = None
 
     def handle_state_change(self, reason: str, snapshot: StateSnapshot) -> None:
+        if self._closing:
+            return
         if snapshot.dataset_revision != self._dataset_revision:
             self._replace_dataset(snapshot)
             return
