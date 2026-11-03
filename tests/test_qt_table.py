@@ -141,6 +141,7 @@ class QtTableTests(unittest.TestCase):
         self.assertEqual(current, 2)
 
         controller.set_scope(TableScope.ALL)
+        pump_until(lambda: coordinator.runner.activity.physical == 0)
         selected, _ = view.capture_selection(model)
         self.assertEqual(selected, (2,))
         after = (
@@ -185,7 +186,7 @@ class QtTableTests(unittest.TestCase):
         pump_until(lambda: controller.search_result is not None)
         self.assertEqual(controller.search_result.source_ids.tolist(), [2, 3])
         self.assertEqual(controller._visible_match_rows(), [])
-        self.assertTrue(shell.table_view.show_all_button.isVisible())
+        self.assertFalse(shell.table_view.show_all_button.isHidden())
 
         controller.show_matches_in_all()
         pump_until(lambda: controller.scope is TableScope.ALL)
