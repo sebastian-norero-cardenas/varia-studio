@@ -170,6 +170,100 @@ class QtTableTests(unittest.TestCase):
         self.assertIs(controller.model.row_map, row_map)
         self.assertEqual(controller.model.rowCount(), 4)
 
+    def test_all_scope_restarts_inflight_search_after_selection_revision(self):
+        coordinator, shell = self.make()
+        self.commit(
+            coordinator,
+            dataset(pd.DataFrame({"text": ["alpha", "beta", "beta", "delta"]})),
+        )
+        controller = coordinator.table_controller
+        controller.set_scope(TableScope.ALL)
+
+        entered = threading.Event()
+        release = threading.Event()
+        from csv_analyzer.table import search_frame as real_search
+
+        calls = {"count": 0}
+
+        def slow_first(frame, spec, *, dataset_revision, cancel=None):
+            calls["count"] += 1
+            if calls["count"] == 1:
+                entered.set()
+                release.wait(timeout=5)
+            return real_search(
+                frame,
+                spec,
+                dataset_revision=dataset_revision,
+                cancel=cancel,
+            )
+
+        with patch("csv_analyzer.qt_app.table_controller.search_frame", slow_first):
+            controller.set_search("beta", SearchMode.EXACT)
+            self.assertTrue(entered.wait(timeout=2))
+            before_map = controller.model.row_map
+            self.assertTrue(
+                coordinator.state.commit_filters(
+                    coordinator.state.revision,
+                    (),
+                    np.array([True, False, True, False], dtype=np.bool_),
+                )
+            )
+            self.assertIs(controller.model.row_map, before_map)
+            release.set()
+            pump_until(
+                lambda: (
+                    controller.search_result is not None
+                    and coordinator.runner.activity.physical == 0
+                )
+            )
+
+        self.assertGreaterEqual(calls["count"], 2)
+        self.assertEqual(controller.search_result.source_ids.tolist(), [2, 3])
+        self.assertIs(controller.model.row_map, before_map)
+
+    def test_all_scope_restarts_inflight_sort_after_selection_revision(self):
+        coordinator, shell = self.make()
+        self.commit(coordinator, dataset(pd.DataFrame({"x": [4, 1, 3, 2]})))
+        controller = coordinator.table_controller
+        controller.set_scope(TableScope.ALL)
+
+        entered = threading.Event()
+        release = threading.Event()
+        from csv_analyzer.table import build_row_map as real_build_row_map
+
+        calls = {"count": 0}
+
+        def slow_first(*args, **kwargs):
+            if kwargs.get("sort_spec") is not None:
+                calls["count"] += 1
+                if calls["count"] == 1:
+                    entered.set()
+                    release.wait(timeout=5)
+            return real_build_row_map(*args, **kwargs)
+
+        with patch("csv_analyzer.qt_app.table_controller.build_row_map", slow_first):
+            controller.set_sort(1, SortDirection.ASC)
+            self.assertTrue(entered.wait(timeout=2))
+            self.assertTrue(
+                coordinator.state.commit_filters(
+                    coordinator.state.revision,
+                    (),
+                    np.array([False, True, False, True], dtype=np.bool_),
+                )
+            )
+            release.set()
+            pump_until(
+                lambda: (
+                    controller.model.row_map is not None
+                    and controller.model.row_map.sort_spec == controller.sort_spec
+                    and coordinator.runner.activity.physical == 0
+                )
+            )
+
+        self.assertGreaterEqual(calls["count"], 2)
+        self.assertEqual(controller.model.row_map.positions.tolist(), [1, 3, 2, 0])
+        self.assertIs(controller.scope, TableScope.ALL)
+
     def test_search_navigation_and_explicit_selected_to_all(self):
         coordinator, shell = self.make()
         frame = pd.DataFrame({"text": ["alpha", "beta", "BETA", "delta"], "n": [1, 2, 3, 4]})

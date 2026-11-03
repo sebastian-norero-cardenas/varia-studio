@@ -79,11 +79,26 @@ class TableController(QObject):
         if snapshot.selection_revision == self._selection_revision:
             return
         self._selection_revision = snapshot.selection_revision
+        search_pending = self.search_spec is not None and self.search_result is None
+        if search_pending:
+            self._cancel_task("table-search")
+
         if self.scope is TableScope.SELECTED:
             self.table_epoch += 1
             self._request_row_map(snapshot, recalculate_search=self.search_spec is not None)
-        else:
-            self._update_counts_and_empty_state(snapshot)
+            return
+
+        row_map = self.model.row_map
+        order_needs_restart = (
+            self.sort_spec is not None
+            and (row_map is None or row_map.sort_spec != self.sort_spec)
+        )
+        if order_needs_restart:
+            self.table_epoch += 1
+            self._request_row_map(snapshot, recalculate_search=search_pending)
+        elif search_pending and self.search_spec is not None:
+            self._request_search(snapshot, self.search_spec)
+        self._update_counts_and_empty_state(snapshot)
 
     def _replace_dataset(self, snapshot: StateSnapshot) -> None:
         self.cancel_derived()
@@ -121,6 +136,12 @@ class TableController(QObject):
         self.model.replace_dataset(snapshot.dataset, row_map, self.visible_columns)
         self._update_counts_and_empty_state(snapshot)
 
+    def _prepare_row_map_change(self) -> bool:
+        search_pending = self.search_spec is not None and self.search_result is None
+        if search_pending:
+            self._cancel_task("table-search")
+        return search_pending
+
     def set_scope(self, scope: TableScope) -> None:
         if not isinstance(scope, TableScope) or scope is self.scope:
             return
@@ -128,13 +149,11 @@ class TableController(QObject):
         if snapshot.dataset is None:
             self.view.set_scope(self.scope)
             return
+        recalculate_search = self._prepare_row_map_change()
         self.scope = scope
         self.view.set_scope(scope)
         self.table_epoch += 1
-        self._request_row_map(
-            snapshot,
-            recalculate_search=self.search_spec is not None and self.search_result is None,
-        )
+        self._request_row_map(snapshot, recalculate_search=recalculate_search)
 
     def set_sort(self, logical_column: int, direction: SortDirection) -> None:
         snapshot = self._snapshot_provider()
@@ -147,23 +166,23 @@ class TableController(QObject):
             column = self.model.column_name(logical_column)
         except IndexError:
             return
+        recalculate_search = self._prepare_row_map_change()
         self.sort_spec = SortSpec(column, direction)
         self.view.set_sort_indicator(logical_column, direction)
         self.table_epoch += 1
-        self._request_row_map(
-            snapshot,
-            recalculate_search=self.search_spec is not None and self.search_result is None,
-        )
+        self._request_row_map(snapshot, recalculate_search=recalculate_search)
 
     def reset_sort(self) -> None:
         if self.model.dataset is None:
             return
+        recalculate_search = self._prepare_row_map_change()
+        self._cancel_task("table-order")
         self.sort_spec = None
         self.view.reset_sort_indicator()
         self.table_epoch += 1
         self._request_row_map(
             self._snapshot_provider(),
-            recalculate_search=self.search_spec is not None and self.search_result is None,
+            recalculate_search=recalculate_search,
         )
 
     def _request_row_map(
