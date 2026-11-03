@@ -437,6 +437,80 @@ class QtTableTests(unittest.TestCase):
         coordinator.table_controller.begin_close()
         self.assertIsNone(shell.table_view.table.model())
 
+    def test_offscreen_shell_widget_smoke_scroll_resize_and_actions(self):
+        coordinator, shell = self.make()
+        rows = 250
+        frame = pd.DataFrame(
+            {
+                "text": [
+                    "needle" if index in (4, 99) else f"row-{index:03d}"
+                    for index in range(rows)
+                ],
+                **{
+                    f"c{column:02d}": np.arange(rows, dtype=np.int64) + column
+                    for column in range(18)
+                },
+            }
+        )
+        shell.resize(520, 360)
+        shell.show()
+        self.commit(coordinator, dataset(frame, "widget-smoke.csv"))
+        APP.processEvents()
+
+        controller = coordinator.table_controller
+        view = shell.table_view
+        model = controller.model
+        self.assertTrue(shell.isVisible())
+        self.assertTrue(view.table.isVisible())
+        self.assertEqual(model.headerData(0, Qt.Orientation.Horizontal), "Source Row ID")
+        self.assertGreater(view.table.verticalScrollBar().maximum(), 0)
+        self.assertGreater(view.table.horizontalScrollBar().maximum(), 0)
+
+        view.table.horizontalHeader().sectionClicked.emit(2)
+        pump_until(
+            lambda: (
+                controller.sort_spec is not None
+                and coordinator.runner.activity.physical == 0
+            )
+        )
+        self.assertEqual(controller.sort_spec.column, "c00")
+
+        all_index = view.scope_combo.findData(TableScope.ALL)
+        self.assertGreaterEqual(all_index, 0)
+        view.scope_combo.setCurrentIndex(all_index)
+        pump_until(
+            lambda: (
+                controller.scope is TableScope.ALL
+                and coordinator.runner.activity.physical == 0
+            )
+        )
+
+        view._search_timer.setInterval(0)
+        view.search_edit.setText("needle")
+        pump_until(lambda: controller.search_result is not None)
+        first_id = view.capture_selection(model)[1]
+        self.assertIn(first_id, (5, 100))
+        view.next_button.click()
+        second_id = view.capture_selection(model)[1]
+        self.assertIn(second_id, (5, 100))
+        self.assertNotEqual(first_id, second_id)
+        view.previous_button.click()
+        self.assertEqual(view.capture_selection(model)[1], first_id)
+
+        view.go_edit.setText("200")
+        view.go_button.click()
+        self.assertEqual(view.capture_selection(model)[1], 200)
+
+        copy_actions = [action for action in view.actions() if action.shortcut().toString()]
+        self.assertEqual(len(copy_actions), 1)
+        copy_actions[0].trigger()
+        self.assertTrue(QApplication.clipboard().text().startswith("200\t"))
+
+        shell.resize(900, 600)
+        APP.processEvents()
+        self.assertGreater(view.table.width(), 0)
+        self.assertGreater(view.table.height(), 0)
+
     def test_zero_row_and_zero_selected_states(self):
         coordinator, shell = self.make()
         empty = dataset(pd.DataFrame({"x": pd.Series([], dtype="int64")}), "empty.csv")
