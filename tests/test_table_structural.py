@@ -16,8 +16,8 @@ from PySide6.QtWidgets import QApplication
 
 from csv_analyzer.data import CancelledError, ColumnInfo, Dataset
 from csv_analyzer.qt_app.coordinator import Lifecycle, QtCoordinator
-from csv_analyzer.qt_app.table_model import DataFrameTableModel
 from csv_analyzer.qt_app.shell import QtShell
+from csv_analyzer.qt_app.table_model import DataFrameTableModel
 from csv_analyzer.qt_app.table_view import TableView
 from csv_analyzer.table import (
     SearchMode,
