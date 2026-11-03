@@ -262,7 +262,7 @@ def _sort_key_factory(series: pd.Series):
         return lambda value: float(value)
     if is_datetime64_any_dtype(dtype):
         return lambda value: pd.Timestamp(value).value
-    if is_string_dtype(dtype) and not dtype == object:
+    if is_string_dtype(dtype) and dtype is not object:
         return lambda value: str(value)
     return _mixed_sort_key
 

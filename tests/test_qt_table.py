@@ -5,7 +5,6 @@ from __future__ import annotations
 import csv
 import io
 import os
-import tempfile
 import threading
 import unittest
 from pathlib import Path
@@ -15,7 +14,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import numpy as np
 import pandas as pd
-from PySide6.QtCore import QEventLoop, QItemSelectionModel, Qt, QTimer
+from PySide6.QtCore import QEventLoop, Qt, QTimer
 from PySide6.QtWidgets import QApplication
 
 from csv_analyzer.data import CancelledError, Dataset, describe_columns

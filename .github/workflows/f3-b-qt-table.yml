@@ -102,6 +102,15 @@ jobs:
       - name: F3.A regression
         run: python -m unittest -v tests.test_qt_foundation
 
+      - name: F3.A load-replacement native stability gate
+        shell: bash
+        run: |
+          set -euxo pipefail
+          for iteration in $(seq 1 10); do
+            echo "f3a_load_replacement_iteration=$iteration"
+            python -m unittest -v               tests.test_qt_foundation.CoordinatorContractTests.test_load_replacement_waits_for_physical_predecessor
+          done
+
       - name: Historical/core regression under Xvfb
         env:
           QT_QPA_PLATFORM: xcb

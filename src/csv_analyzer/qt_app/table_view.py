@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from PySide6.QtCore import QItemSelectionModel, QTimer, Qt, Signal
+from PySide6.QtCore import QItemSelectionModel, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QAbstractItemView,
