@@ -443,8 +443,7 @@ class QtTableTests(unittest.TestCase):
         frame = pd.DataFrame(
             {
                 "text": [
-                    "needle" if index in (4, 99) else f"row-{index:03d}"
-                    for index in range(rows)
+                    "needle" if index in (4, 99) else f"row-{index:03d}" for index in range(rows)
                 ],
                 **{
                     f"c{column:02d}": np.arange(rows, dtype=np.int64) + column
@@ -468,10 +467,7 @@ class QtTableTests(unittest.TestCase):
 
         view.table.horizontalHeader().sectionClicked.emit(2)
         pump_until(
-            lambda: (
-                controller.sort_spec is not None
-                and coordinator.runner.activity.physical == 0
-            )
+            lambda: controller.sort_spec is not None and coordinator.runner.activity.physical == 0
         )
         self.assertEqual(controller.sort_spec.column, "c00")
 
@@ -479,10 +475,7 @@ class QtTableTests(unittest.TestCase):
         self.assertGreaterEqual(all_index, 0)
         view.scope_combo.setCurrentIndex(all_index)
         pump_until(
-            lambda: (
-                controller.scope is TableScope.ALL
-                and coordinator.runner.activity.physical == 0
-            )
+            lambda: controller.scope is TableScope.ALL and coordinator.runner.activity.physical == 0
         )
 
         view._search_timer.setInterval(0)
