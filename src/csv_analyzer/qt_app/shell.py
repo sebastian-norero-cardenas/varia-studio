@@ -1,4 +1,4 @@
-"""Minimal Qt shell for F3.A. Product views intentionally remain placeholders."""
+"""Qt shell with the F3.B tabular exploration view."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ class QtShell(QMainWindow):
         super().__init__()
         self._allow_close = False
         self.setWindowTitle("Varia Studio — Qt Foundation")
-        self.resize(860, 520)
+        self.resize(1100, 700)
 
         root = QWidget(self)
         layout = QVBoxLayout(root)
@@ -61,10 +61,10 @@ class QtShell(QMainWindow):
         actions.addStretch(1)
         layout.addLayout(actions)
 
-        layout.addWidget(QLabel("Data table — F3.B placeholder"))
-        layout.addWidget(QLabel("Charts — not migrated in F3.A"))
-        layout.addWidget(QLabel("Statistics — not migrated in F3.A"))
-        layout.addStretch(1)
+        self.table_view = TableView(self)
+        layout.addWidget(self.table_view, 1)
+        layout.addWidget(QLabel("Charts — not migrated yet"))
+        layout.addWidget(QLabel("Statistics — not migrated yet"))
         self.setCentralWidget(root)
 
     def set_dataset(self, name: str | None, rows: int = 0, columns: int = 0) -> None:

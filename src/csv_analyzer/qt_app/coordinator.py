@@ -19,6 +19,7 @@ from ..state import AppState
 from .diagnostics import best_effort_exception_log, best_effort_log
 from .errors import user_error_text
 from .shell import QtShell
+from .table_controller import TableController
 from .tasks import (
     QtTaskRunner,
     RunnerActivity,
@@ -125,6 +126,13 @@ class QtCoordinator(QObject):
         shell.open_requested.connect(self.open_file)
         shell.cancel_requested.connect(self.cancel_all)
         shell.close_requested.connect(self.begin_close)
+        self.table_controller = TableController(
+            shell.table_view,
+            snapshot_provider=self.snapshot,
+            submit_task=self.submit_task,
+            cancel_task=self.runner.cancel,
+            parent=self,
+        )
         self.state.subscribe(self._on_state_changed)
 
     def start(self) -> None:
@@ -373,6 +381,8 @@ class QtCoordinator(QObject):
             self._finalize_close()
 
     def _on_state_changed(self, reason: str) -> None:
+        snapshot = self.state.snapshot()
+        self.table_controller.handle_state_change(reason, snapshot)
         shell = self._shell()
         dataset = self.state.dataset
         if shell is None:
