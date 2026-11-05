@@ -46,18 +46,34 @@ class PlotPanel(QWidget):
         return self.figure is not None
 
     def show_figure(self, figure: Figure, description: str) -> None:
-        """Draw the candidate fully before replacing the last valid figure."""
-        canvas = self.canvas_class(figure)
-        canvas.setParent(self.host)
-        toolbar = self.toolbar_class(canvas, self.host)
-        canvas.hide()
-        toolbar.hide()
+        """Prepare a candidate transactionally before replacing the active figure."""
+        candidate_owner = QWidget()
+        initial_canvas = getattr(figure, "canvas", None)
+        canvas = None
+        toolbar = None
         try:
+            canvas = self.canvas_class(figure)
+            canvas.setParent(candidate_owner)
+            toolbar = self.toolbar_class(canvas, candidate_owner)
+            canvas.hide()
+            toolbar.hide()
             canvas.draw()
+
+            # Ownership is transferred only after the candidate has drawn
+            # successfully. Public state still points to the active tuple A.
+            toolbar.setParent(self.host)
+            canvas.setParent(self.host)
         except Exception:
-            self._dispose_tuple(figure, canvas, toolbar)
+            self._dispose_candidate(
+                figure,
+                initial_canvas,
+                canvas,
+                toolbar,
+                candidate_owner,
+            )
             raise
 
+        candidate_owner.deleteLater()
         old = (self.figure, self.canvas, self.toolbar)
         self.figure, self.canvas, self.toolbar = figure, canvas, toolbar
         self.empty_label.hide()
@@ -82,26 +98,91 @@ class PlotPanel(QWidget):
         self.caption.setText(f"Figure not updated: {message}")
         self.caption.setStyleSheet("color: #a33;")
 
+    @classmethod
+    def _dispose_candidate(
+        cls,
+        figure,
+        initial_canvas,
+        canvas,
+        toolbar,
+        candidate_owner,
+    ) -> None:
+        """Rollback an unpublished QtAgg candidate, including partial constructors."""
+        candidate_canvas = canvas
+        if candidate_canvas is None:
+            attached = getattr(figure, "canvas", None)
+            if attached is not initial_canvas:
+                candidate_canvas = attached
+
+        linked_toolbar = toolbar
+        if linked_toolbar is None and candidate_canvas is not None:
+            linked_toolbar = getattr(candidate_canvas, "toolbar", None)
+        cls._break_toolbar_links(candidate_canvas, linked_toolbar)
+
+        try:
+            figure.clear()
+        finally:
+            try:
+                figure.set_canvas(None)
+            except Exception:
+                pass
+
+        for attached_canvas in (candidate_canvas, initial_canvas):
+            if attached_canvas is None:
+                continue
+            try:
+                if getattr(attached_canvas, "figure", None) is figure:
+                    attached_canvas.figure = None
+            except Exception:
+                pass
+
+        # Anything still below candidate_owner, including a toolbar whose
+        # Python constructor raised before returning, is destroyed with this
+        # private ownership boundary after Qt processes DeferredDelete.
+        for widget in (toolbar, candidate_canvas):
+            if widget is None:
+                continue
+            try:
+                if widget.parent() is candidate_owner:
+                    continue
+                widget.hide()
+                widget.setParent(None)
+                widget.deleteLater()
+            except RuntimeError:
+                pass
+        candidate_owner.deleteLater()
+
+    @staticmethod
+    def _break_toolbar_links(canvas, toolbar) -> None:
+        if canvas is None or toolbar is None:
+            return
+        for attribute in ("_id_press", "_id_release", "_id_drag"):
+            callback_id = getattr(toolbar, attribute, None)
+            if callback_id is not None:
+                try:
+                    canvas.mpl_disconnect(callback_id)
+                except Exception:
+                    pass
+                try:
+                    setattr(toolbar, attribute, None)
+                except Exception:
+                    pass
+        try:
+            if getattr(canvas, "toolbar", None) is toolbar:
+                canvas.toolbar = None
+        except Exception:
+            pass
+        try:
+            if getattr(toolbar, "canvas", None) is canvas:
+                toolbar.canvas = None
+        except Exception:
+            pass
+
     @staticmethod
     def _dispose_tuple(figure, canvas, toolbar) -> None:
         if figure is None and canvas is None and toolbar is None:
             return
-        if canvas is not None and toolbar is not None:
-            for attribute in ("_id_press", "_id_release", "_id_drag"):
-                callback_id = getattr(toolbar, attribute, None)
-                if callback_id is not None:
-                    try:
-                        canvas.mpl_disconnect(callback_id)
-                    except Exception:
-                        pass
-                    try:
-                        setattr(toolbar, attribute, None)
-                    except Exception:
-                        pass
-            if getattr(canvas, "toolbar", None) is toolbar:
-                canvas.toolbar = None
-            if getattr(toolbar, "canvas", None) is canvas:
-                toolbar.canvas = None
+        PlotPanel._break_toolbar_links(canvas, toolbar)
 
         if toolbar is not None:
             toolbar.hide()
