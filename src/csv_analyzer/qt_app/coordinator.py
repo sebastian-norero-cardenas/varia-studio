@@ -216,10 +216,7 @@ class QtCoordinator(QObject):
     def _supersede_plot_work(self, keep_key: str) -> None:
         """Cancel unpublished work from another Qt plot family without clearing its figure."""
         for other_key, publication in tuple(self._publications.items()):
-            if (
-                other_key != keep_key
-                and publication.token.exclusive_group == "plots"
-            ):
+            if other_key != keep_key and publication.token.exclusive_group == "plots":
                 self._publications.pop(other_key, None)
                 self.runner.cancel(other_key)
 
