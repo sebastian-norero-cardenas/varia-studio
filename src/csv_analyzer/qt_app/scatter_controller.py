@@ -59,12 +59,8 @@ class ScatterController(QObject):
         if selection_changed:
             self._invalidate_pending()
             self.current_counts = None
-            self.view.panel.clear(
-                "Selection changed. Plot again to use the current filters."
-            )
-            self.view.set_feedback(
-                "Selection changed. Plot again to use the current filters."
-            )
+            self.view.panel.clear("Selection changed. Plot again to use the current filters.")
+            self.view.set_feedback("Selection changed. Plot again to use the current filters.")
 
     @Slot()
     def request_plot(self) -> None:
