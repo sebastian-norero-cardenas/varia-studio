@@ -6,6 +6,7 @@ import os
 import threading
 import unittest
 from pathlib import Path
+
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import numpy as np
