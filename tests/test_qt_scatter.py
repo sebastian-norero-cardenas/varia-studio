@@ -458,6 +458,92 @@ class QtScatterTests(unittest.TestCase):
         self.assert_active_tuple(panel, *original)
         panel.canvas_class = original_canvas_class
 
+    def test_pending_draw_idle_is_neutralized_before_canvas_detaches(self):
+        coordinator, shell = self.make()
+        self.commit(
+            coordinator,
+            dataset(pd.DataFrame({"x": [1.0, 2.0], "y": [2.0, 3.0]})),
+        )
+        self.plot_and_wait(coordinator)
+        panel = shell.scatter_view.panel
+        canvas_a = panel.canvas
+        late_draws = []
+
+        canvas_a.draw = lambda: late_draws.append(canvas_a.figure)
+        canvas_a.draw_idle()
+        self.assertTrue(getattr(canvas_a, "_draw_pending", False))
+        late_callback = canvas_a._draw_idle
+
+        figure_b = Figure()
+        figure_b.add_subplot(111).plot([1.0, 2.0], [4.0, 5.0])
+        panel.show_figure(figure_b, "candidate B")
+        late_callback()
+        drain_qt_deletes()
+
+        self.assertEqual(late_draws, [])
+        self.assertIs(panel.figure, figure_b)
+        self.assert_active_tuple(panel, panel.figure, panel.canvas, panel.toolbar)
+
+    def test_toolbar_navigation_pending_draw_does_not_reach_retired_canvas(self):
+        coordinator, shell = self.make()
+        self.commit(
+            coordinator,
+            dataset(pd.DataFrame({"x": [1.0, 2.0], "y": [2.0, 3.0]})),
+        )
+        self.plot_and_wait(coordinator)
+        panel = shell.scatter_view.panel
+        canvas_a = panel.canvas
+        toolbar_a = panel.toolbar
+        late_draws = []
+
+        toolbar_a.push_current()
+        panel.figure.axes[0].set_xlim(0.5, 2.5)
+        toolbar_a.push_current()
+        canvas_a.draw = lambda: late_draws.append(canvas_a.figure)
+        toolbar_a.back()
+        self.assertTrue(getattr(canvas_a, "_draw_pending", False))
+        late_callback = canvas_a._draw_idle
+
+        figure_b = Figure()
+        figure_b.add_subplot(111).plot([1.0, 2.0], [5.0, 6.0])
+        panel.show_figure(figure_b, "candidate B")
+        late_callback()
+        drain_qt_deletes()
+
+        self.assertEqual(late_draws, [])
+        self.assertIs(panel.figure, figure_b)
+        self.assert_active_tuple(panel, panel.figure, panel.canvas, panel.toolbar)
+
+    def test_repeated_draw_idle_replot_does_not_accumulate_or_draw_retired_canvas(self):
+        coordinator, shell = self.make()
+        self.commit(
+            coordinator,
+            dataset(pd.DataFrame({"x": [1.0, 2.0], "y": [2.0, 3.0]})),
+        )
+        self.plot_and_wait(coordinator)
+        panel = shell.scatter_view.panel
+        late_draws = []
+
+        for index in range(10):
+            retired_canvas = panel.canvas
+            retired_canvas.draw = lambda i=index: late_draws.append(i)
+            retired_canvas.draw_idle()
+            self.assertTrue(getattr(retired_canvas, "_draw_pending", False))
+            late_callback = retired_canvas._draw_idle
+
+            next_figure = Figure()
+            next_figure.add_subplot(111).plot(
+                [1.0, 2.0],
+                [float(index), float(index + 1)],
+            )
+            panel.show_figure(next_figure, f"candidate {index}")
+            late_callback()
+            drain_qt_deletes()
+
+            self.assertEqual(late_draws, [])
+            self.assertIs(panel.figure, next_figure)
+            self.assert_active_tuple(panel, panel.figure, panel.canvas, panel.toolbar)
+
     def test_replacement_keeps_single_canvas_toolbar_and_figure(self):
         coordinator, shell = self.make()
         self.commit(
