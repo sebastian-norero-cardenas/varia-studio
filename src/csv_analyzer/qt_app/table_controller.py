@@ -55,12 +55,14 @@ class TableController(QObject):
         self._selection_revision = -1
         self._pending_go_source_id: int | None = None
         self._pending_search_first = False
+        self._pending_search_spec: SearchSpec | None = None
         self._closing = False
 
         view.scope_requested.connect(self.set_scope)
         view.sort_requested.connect(self.set_sort)
         view.reset_sort_requested.connect(self.reset_sort)
         view.search_requested.connect(self.set_search)
+        view.search_activated.connect(self.activate_search)
         view.previous_requested.connect(self.previous_match)
         view.next_requested.connect(self.next_match)
         view.show_all_requested.connect(self.show_matches_in_all)
@@ -71,7 +73,11 @@ class TableController(QObject):
 
     def cancel_derived(self) -> None:
         self._cancel_task("table-order")
+        self._cancel_pending_search()
+
+    def _cancel_pending_search(self) -> None:
         self._cancel_task("table-search")
+        self._pending_search_spec = None
 
     def begin_close(self) -> None:
         if self._closing:
@@ -87,6 +93,7 @@ class TableController(QObject):
             (view.sort_requested, self.set_sort),
             (view.reset_sort_requested, self.reset_sort),
             (view.search_requested, self.set_search),
+            (view.search_activated, self.activate_search),
             (view.previous_requested, self.previous_match),
             (view.next_requested, self.next_match),
             (view.show_all_requested, self.show_matches_in_all),
@@ -108,9 +115,9 @@ class TableController(QObject):
         if snapshot.selection_revision == self._selection_revision:
             return
         self._selection_revision = snapshot.selection_revision
-        search_pending = self.search_spec is not None and self.search_result is None
+        search_pending = self._pending_search_spec is not None
         if search_pending:
-            self._cancel_task("table-search")
+            self._cancel_pending_search()
 
         if self.scope is TableScope.SELECTED:
             self.table_epoch += 1
@@ -165,9 +172,9 @@ class TableController(QObject):
         self._update_counts_and_empty_state(snapshot)
 
     def _prepare_row_map_change(self) -> bool:
-        search_pending = self.search_spec is not None and self.search_result is None
+        search_pending = self._pending_search_spec is not None
         if search_pending:
-            self._cancel_task("table-search")
+            self._cancel_pending_search()
         return search_pending
 
     def set_scope(self, scope: TableScope) -> None:
@@ -293,6 +300,7 @@ class TableController(QObject):
         preserved_ids, current_id = self.view.capture_selection(self.model)
         self.model.replace_row_map(row_map)
         self.view.restore_selection(self.model, preserved_ids, current_id)
+        self._sync_current_match_to_source_id(current_id)
         self._update_counts_and_empty_state(snapshot)
 
         if self._pending_go_source_id is not None:
@@ -311,18 +319,36 @@ class TableController(QObject):
             mode = SearchMode.CONTAINS_CASE_INSENSITIVE
         text = text
         if not text:
-            self._cancel_task("table-search")
+            self._cancel_pending_search()
             self.search_spec = None
             self.search_result = None
             self.current_match = None
             self.view.set_search_status("")
             self._update_counts_and_empty_state(self._snapshot_provider())
             return
+        self._cancel_pending_search()
         spec = SearchSpec(text, mode)
         self.search_spec = spec
         self.search_result = None
         self.current_match = None
         self._request_search(self._snapshot_provider(), spec)
+
+    def activate_search(self, text: str, mode: SearchMode) -> None:
+        if not isinstance(mode, SearchMode):
+            mode = SearchMode.CONTAINS_CASE_INSENSITIVE
+        if not text:
+            self.set_search(text, mode)
+            return
+
+        spec = SearchSpec(text, mode)
+        if self.search_spec == spec:
+            if self.search_result is not None:
+                self.next_match()
+                return
+            if self._pending_search_spec == spec:
+                return
+
+        self.set_search(text, mode)
 
     def _request_search(self, snapshot: StateSnapshot, spec: SearchSpec) -> None:
         if snapshot.dataset is None:
@@ -338,16 +364,19 @@ class TableController(QObject):
                 cancel=cancel,
             )
 
-        self._submit_task(
+        token = self._submit_task(
             "table-search",
             work,
             success=lambda result: self._install_search(result, epoch, spec),
-            failure=self._derived_failure,
+            failure=lambda error: self._search_failure(error, spec),
             receiver=self,
             exclusive_group="table-derived",
         )
+        self._pending_search_spec = spec if token is not None else None
 
     def _install_search(self, result: SearchResult, epoch: int, spec: SearchSpec) -> None:
+        if self._pending_search_spec == spec:
+            self._pending_search_spec = None
         snapshot = self._snapshot_provider()
         if (
             snapshot.dataset is None
@@ -360,12 +389,29 @@ class TableController(QObject):
         self.current_match = None
         self._refresh_search_navigation(autonavigate=True)
 
+    def _search_failure(self, error: BaseException, spec: SearchSpec) -> None:
+        if self._pending_search_spec == spec:
+            self._pending_search_spec = None
+        self._derived_failure(error)
+
     def _visible_match_rows(self) -> list[int]:
         if self.search_result is None or self.model.row_map is None:
             return []
         return self.model.row_map.visible_rows_for_source_ids(
             self.search_result.source_ids
         ).tolist()
+
+    def _sync_current_match_to_source_id(self, source_id: int | None) -> None:
+        if source_id is None or self.search_result is None:
+            return
+        visible_row = self.model.visible_row_for_source_id(source_id)
+        if visible_row is None:
+            return
+        rows = self._visible_match_rows()
+        try:
+            self.current_match = rows.index(visible_row)
+        except ValueError:
+            pass
 
     def _refresh_search_navigation(self, *, autonavigate: bool = False) -> None:
         if self.search_spec is None or self.search_result is None:

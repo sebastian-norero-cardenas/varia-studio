@@ -26,6 +26,7 @@ class TableView(QWidget):
     sort_requested = Signal(int, object)
     reset_sort_requested = Signal()
     search_requested = Signal(str, object)
+    search_activated = Signal(str, object)
     previous_requested = Signal()
     next_requested = Signal()
     show_all_requested = Signal()
@@ -81,6 +82,7 @@ class TableView(QWidget):
         self._search_timer.timeout.connect(self._emit_search)
         self.search_edit.textChanged.connect(lambda _text: self._search_timer.start())
         self.search_mode.currentIndexChanged.connect(lambda _index: self._search_timer.start())
+        self.search_edit.returnPressed.connect(self._activate_search)
 
         go_row = QHBoxLayout()
         go_row.addWidget(QLabel("Go to Source Row ID:"))
@@ -134,6 +136,11 @@ class TableView(QWidget):
     def _emit_search(self) -> None:
         mode = self.search_mode.currentData()
         self.search_requested.emit(self.search_edit.text(), mode)
+
+    def _activate_search(self) -> None:
+        self._search_timer.stop()
+        mode = self.search_mode.currentData()
+        self.search_activated.emit(self.search_edit.text(), mode)
 
     def _header_clicked(self, column: int) -> None:
         if column == 0:

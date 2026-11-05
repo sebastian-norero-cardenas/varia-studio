@@ -292,6 +292,244 @@ class QtTableTests(unittest.TestCase):
         controller.previous_match()
         self.assertEqual(shell.table_view.capture_selection(controller.model)[1], current)
 
+    def test_search_enter_immediate_activation_stops_debounce_and_selects_first_match(self):
+        coordinator, shell = self.make()
+        self.commit(
+            coordinator,
+            dataset(pd.DataFrame({"text": ["alpha", "beta", "beta"]})),
+        )
+        view = shell.table_view
+        controller = coordinator.table_controller
+        view._search_timer.setInterval(10_000)
+        view.search_edit.setText("beta")
+        self.assertTrue(view._search_timer.isActive())
+
+        view.search_edit.returnPressed.emit()
+
+        self.assertFalse(view._search_timer.isActive())
+        pump_until(lambda: controller.search_result is not None)
+        self.assertEqual(view.capture_selection(controller.model)[1], 2)
+
+    def test_search_enter_pending_same_spec_does_not_duplicate_work_or_debounce(self):
+        coordinator, shell = self.make()
+        self.commit(
+            coordinator,
+            dataset(pd.DataFrame({"text": ["alpha", "beta", "beta"]})),
+        )
+        view = shell.table_view
+        controller = coordinator.table_controller
+        entered = threading.Event()
+        release = threading.Event()
+        calls = {"count": 0}
+        from csv_analyzer.table import search_frame as real_search
+
+        def slow_search(frame, spec, *, dataset_revision, cancel=None):
+            calls["count"] += 1
+            entered.set()
+            release.wait(timeout=5)
+            return real_search(
+                frame,
+                spec,
+                dataset_revision=dataset_revision,
+                cancel=cancel,
+            )
+
+        with patch("csv_analyzer.qt_app.table_controller.search_frame", slow_search):
+            view.search_edit.setText("beta")
+            view.search_edit.returnPressed.emit()
+            self.assertTrue(entered.wait(timeout=2))
+            view.search_edit.returnPressed.emit()
+            self.assertEqual(calls["count"], 1)
+            release.set()
+            pump_until(
+                lambda: (
+                    controller.search_result is not None
+                    and coordinator.runner.activity.physical == 0
+                )
+            )
+            loop = QEventLoop()
+            QTimer.singleShot(250, loop.quit)
+            loop.exec()
+
+        self.assertEqual(calls["count"], 1)
+        self.assertFalse(view._search_timer.isActive())
+        self.assertEqual(view.capture_selection(controller.model)[1], 2)
+
+    def test_search_enter_cycles_multiple_matches_with_wrap(self):
+        coordinator, shell = self.make()
+        self.commit(
+            coordinator,
+            dataset(pd.DataFrame({"text": ["alpha", "beta", "beta", "beta"]})),
+        )
+        view = shell.table_view
+        controller = coordinator.table_controller
+        view._search_timer.setInterval(10_000)
+        view.search_edit.setText("beta")
+        view.search_edit.returnPressed.emit()
+        pump_until(lambda: controller.search_result is not None)
+        self.assertEqual(view.capture_selection(controller.model)[1], 2)
+
+        view.search_edit.returnPressed.emit()
+        self.assertEqual(view.capture_selection(controller.model)[1], 3)
+        view.search_edit.returnPressed.emit()
+        self.assertEqual(view.capture_selection(controller.model)[1], 4)
+        view.search_edit.returnPressed.emit()
+        self.assertEqual(view.capture_selection(controller.model)[1], 2)
+
+    def test_search_enter_single_match_remains_selected(self):
+        coordinator, shell = self.make()
+        self.commit(
+            coordinator,
+            dataset(pd.DataFrame({"text": ["alpha", "beta", "gamma"]})),
+        )
+        view = shell.table_view
+        controller = coordinator.table_controller
+        view._search_timer.setInterval(10_000)
+        view.search_edit.setText("beta")
+        view.search_edit.returnPressed.emit()
+        pump_until(lambda: controller.search_result is not None)
+        self.assertEqual(view.capture_selection(controller.model)[1], 2)
+
+        view.search_edit.returnPressed.emit()
+        view.search_edit.returnPressed.emit()
+        self.assertEqual(view.capture_selection(controller.model)[1], 2)
+        self.assertEqual(view.match_label.text(), "1 / 1")
+
+    def test_search_enter_after_sort_uses_new_visible_order(self):
+        coordinator, shell = self.make()
+        frame = pd.DataFrame(
+            {
+                "text": ["beta", "beta", "beta"],
+                "score": [2, 3, 1],
+            }
+        )
+        self.commit(coordinator, dataset(frame))
+        view = shell.table_view
+        controller = coordinator.table_controller
+        view._search_timer.setInterval(10_000)
+        view.search_edit.setText("beta")
+        view.search_edit.returnPressed.emit()
+        pump_until(lambda: controller.search_result is not None)
+        self.assertEqual(view.capture_selection(controller.model)[1], 1)
+
+        view.table.horizontalHeader().sectionClicked.emit(2)
+        pump_until(lambda: coordinator.runner.activity.physical == 0)
+        self.assertEqual(controller.model.row_map.positions.tolist(), [2, 0, 1])
+        self.assertEqual(view.capture_selection(controller.model)[1], 1)
+
+        view.search_edit.returnPressed.emit()
+        self.assertEqual(view.capture_selection(controller.model)[1], 2)
+
+    def test_search_enter_selected_scope_never_switches_to_all(self):
+        coordinator, shell = self.make()
+        frame = pd.DataFrame({"text": ["alpha", "beta", "beta", "delta"]})
+        self.commit(coordinator, dataset(frame))
+        controller = coordinator.table_controller
+        view = shell.table_view
+        self.assertTrue(
+            coordinator.state.commit_filters(
+                coordinator.state.revision,
+                (),
+                np.array([False, True, False, False], dtype=np.bool_),
+            )
+        )
+        pump_until(lambda: controller.model.rowCount() == 1)
+        view._search_timer.setInterval(10_000)
+        view.search_edit.setText("beta")
+        view.search_edit.returnPressed.emit()
+        pump_until(lambda: controller.search_result is not None)
+        self.assertIs(controller.scope, TableScope.SELECTED)
+        self.assertEqual(view.capture_selection(controller.model)[1], 2)
+
+        coordinator2, shell2 = self.make()
+        self.commit(coordinator2, dataset(frame, "outside.csv"))
+        controller2 = coordinator2.table_controller
+        view2 = shell2.table_view
+        self.assertTrue(
+            coordinator2.state.commit_filters(
+                coordinator2.state.revision,
+                (),
+                np.array([True, False, False, True], dtype=np.bool_),
+            )
+        )
+        pump_until(lambda: controller2.model.rowCount() == 2)
+        view2._search_timer.setInterval(10_000)
+        view2.search_edit.setText("beta")
+        view2.search_edit.returnPressed.emit()
+        pump_until(lambda: controller2.search_result is not None)
+        self.assertIs(controller2.scope, TableScope.SELECTED)
+        self.assertEqual(controller2._visible_match_rows(), [])
+        self.assertFalse(view2.show_all_button.isHidden())
+
+    def test_search_enter_all_scope_navigates_normally(self):
+        coordinator, shell = self.make()
+        self.commit(
+            coordinator,
+            dataset(pd.DataFrame({"text": ["beta", "alpha", "beta"]})),
+        )
+        controller = coordinator.table_controller
+        view = shell.table_view
+        controller.set_scope(TableScope.ALL)
+        view._search_timer.setInterval(10_000)
+        view.search_edit.setText("beta")
+        view.search_edit.returnPressed.emit()
+        pump_until(lambda: controller.search_result is not None)
+        self.assertIs(controller.scope, TableScope.ALL)
+        self.assertEqual(view.capture_selection(controller.model)[1], 1)
+
+        view.search_edit.returnPressed.emit()
+        self.assertEqual(view.capture_selection(controller.model)[1], 3)
+
+    def test_search_enter_preserves_app_revisions_and_mask(self):
+        coordinator, shell = self.make()
+        self.commit(
+            coordinator,
+            dataset(pd.DataFrame({"text": ["beta", "beta", "gamma"]})),
+        )
+        controller = coordinator.table_controller
+        view = shell.table_view
+        self.assertTrue(
+            coordinator.state.commit_filters(
+                coordinator.state.revision,
+                (),
+                np.array([True, True, False], dtype=np.bool_),
+            )
+        )
+        pump_until(lambda: controller.model.rowCount() == 2)
+        before = (
+            coordinator.state.revision,
+            coordinator.state.selection_revision,
+            coordinator.state.mask,
+        )
+        view._search_timer.setInterval(10_000)
+        view.search_edit.setText("beta")
+        view.search_edit.returnPressed.emit()
+        pump_until(lambda: controller.search_result is not None)
+        view.search_edit.returnPressed.emit()
+
+        self.assertEqual(coordinator.state.revision, before[0])
+        self.assertEqual(coordinator.state.selection_revision, before[1])
+        self.assertIs(coordinator.state.mask, before[2])
+
+    def test_search_enter_keeps_next_previous_buttons_behavior(self):
+        coordinator, shell = self.make()
+        self.commit(
+            coordinator,
+            dataset(pd.DataFrame({"text": ["beta", "beta", "beta"]})),
+        )
+        controller = coordinator.table_controller
+        view = shell.table_view
+        view._search_timer.setInterval(10_000)
+        view.search_edit.setText("beta")
+        view.search_edit.returnPressed.emit()
+        pump_until(lambda: controller.search_result is not None)
+        self.assertEqual(view.capture_selection(controller.model)[1], 1)
+
+        view.next_button.click()
+        self.assertEqual(view.capture_selection(controller.model)[1], 2)
+        view.previous_button.click()
+        self.assertEqual(view.capture_selection(controller.model)[1], 1)
+
     def test_go_to_source_id_switches_explicitly_and_invalid_input_keeps_scope(self):
         coordinator, shell = self.make()
         self.commit(coordinator, dataset(pd.DataFrame({"x": [10, 20, 30]})))
