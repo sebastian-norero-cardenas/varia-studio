@@ -63,9 +63,7 @@ class FilterEngineTests(unittest.TestCase):
         self.assertEqual(build_filter_mask(frame, ()).tolist(), [True, True])
 
     def test_invalid_rules_are_rejected(self):
-        frame = pd.DataFrame(
-            {"x": [1.0, 2.0], "flag": [True, False], "name": ["a", "b"]}
-        )
+        frame = pd.DataFrame({"x": [1.0, 2.0], "flag": [True, False], "name": ["a", "b"]})
         invalid = (
             FilterRule("x"),
             FilterRule("x", lower=3, upper=2),
