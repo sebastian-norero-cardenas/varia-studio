@@ -107,13 +107,28 @@ class SortTests(unittest.TestCase):
         self.assertEqual(self.sort(pd.Series(["b", "a", "c"])), [1, 0, 2])
         self.assertEqual(self.sort(pd.Series([True, False, True], dtype="bool")), [1, 0, 2])
         category = pd.Series(
-            pd.Categorical(["medium", "low", "high"], categories=["low", "medium", "high"])
+            pd.Categorical(
+                ["medium", "low", "high"],
+                categories=["low", "medium", "high"],
+                ordered=True,
+            )
         )
         self.assertEqual(self.sort(category), [1, 0, 2])
         dates = pd.Series(pd.to_datetime(["2024-02-01", "2023-01-01", None]))
         self.assertEqual(self.sort(dates), [1, 0, 2])
         mixed = pd.Series(["10", 2, True, 1.5], dtype="object")
         self.assertEqual(self.sort(mixed), [2, 1, 3, 0])
+
+    def test_unordered_categorical_uses_textual_order_null_last_and_tie_break(self):
+        category = pd.Series(
+            pd.Categorical(
+                ["z", "a", "z", None],
+                categories=["z", "a"],
+                ordered=False,
+            )
+        )
+        self.assertEqual(self.sort(category, SortDirection.ASC), [1, 0, 2, 3])
+        self.assertEqual(self.sort(category, SortDirection.DESC), [0, 2, 1, 3])
 
     def test_reset_sort_returns_source_order_inside_scope(self):
         frame = pd.DataFrame({"v": [3, 1, 2, 0]})

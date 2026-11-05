@@ -170,6 +170,177 @@ class QtTableTests(unittest.TestCase):
         self.assertIs(controller.model.row_map, row_map)
         self.assertEqual(controller.model.rowCount(), 4)
 
+    def test_selected_to_all_sorted_race_retries_after_selection_revision_change(self):
+        coordinator, shell = self.make()
+        self.commit(coordinator, dataset(pd.DataFrame({"x": [3, 1, 2, 4]})))
+        controller = coordinator.table_controller
+        model = controller.model
+
+        self.assertTrue(
+            coordinator.state.commit_filters(
+                coordinator.state.revision,
+                (),
+                np.array([True, False, True, False], dtype=np.bool_),
+            )
+        )
+        pump_until(lambda: model.rowCount() == 2)
+        controller.set_sort(1, SortDirection.ASC)
+        pump_until(lambda: coordinator.runner.activity.physical == 0)
+        self.assertEqual(
+            [model.source_row_id_at(row) for row in range(model.rowCount())],
+            [3, 1],
+        )
+
+        entered = threading.Event()
+        release = threading.Event()
+
+        def hold_table_group(cancel):
+            entered.set()
+            release.wait(timeout=5)
+
+        token = coordinator.submit_task(
+            "f3b-race-blocker",
+            hold_table_group,
+            exclusive_group="table-derived",
+        )
+        self.assertIsNotNone(token)
+        self.assertTrue(entered.wait(timeout=2))
+        try:
+            controller.set_scope(TableScope.ALL)
+            self.assertIs(controller.scope, TableScope.ALL)
+            self.assertIs(model.row_map.scope, TableScope.SELECTED)
+
+            self.assertTrue(
+                coordinator.state.commit_filters(
+                    coordinator.state.revision,
+                    (),
+                    np.array([False, True, False, True], dtype=np.bool_),
+                )
+            )
+        finally:
+            release.set()
+
+        pump_until(lambda: coordinator.runner.activity.physical == 0)
+        self.assertIs(controller.scope, TableScope.ALL)
+        self.assertIs(model.row_map.scope, TableScope.ALL)
+        self.assertEqual(model.rowCount(), 4)
+        self.assertEqual(
+            [model.source_row_id_at(row) for row in range(model.rowCount())],
+            [2, 3, 1, 4],
+        )
+        self.assertEqual(shell.table_view.count_label.text(), "All rows · 4 / 4")
+
+    def test_selected_to_all_sorted_control_without_selection_revision_change(self):
+        coordinator, shell = self.make()
+        self.commit(coordinator, dataset(pd.DataFrame({"x": [3, 1, 2, 4]})))
+        controller = coordinator.table_controller
+        model = controller.model
+        self.assertTrue(
+            coordinator.state.commit_filters(
+                coordinator.state.revision,
+                (),
+                np.array([True, False, True, False], dtype=np.bool_),
+            )
+        )
+        pump_until(lambda: model.rowCount() == 2)
+        controller.set_sort(1, SortDirection.ASC)
+        pump_until(lambda: coordinator.runner.activity.physical == 0)
+
+        entered = threading.Event()
+        release = threading.Event()
+
+        def hold_table_group(cancel):
+            entered.set()
+            release.wait(timeout=5)
+
+        coordinator.submit_task(
+            "f3b-control-blocker",
+            hold_table_group,
+            exclusive_group="table-derived",
+        )
+        self.assertTrue(entered.wait(timeout=2))
+        try:
+            controller.set_scope(TableScope.ALL)
+            self.assertIs(model.row_map.scope, TableScope.SELECTED)
+        finally:
+            release.set()
+
+        pump_until(lambda: coordinator.runner.activity.physical == 0)
+        self.assertIs(controller.scope, TableScope.ALL)
+        self.assertIs(model.row_map.scope, TableScope.ALL)
+        self.assertEqual(
+            [model.source_row_id_at(row) for row in range(model.rowCount())],
+            [2, 3, 1, 4],
+        )
+
+    def test_materialized_all_sorted_survives_selection_revision_without_rebuild(self):
+        coordinator, shell = self.make()
+        self.commit(coordinator, dataset(pd.DataFrame({"x": [3, 1, 2, 4]})))
+        controller = coordinator.table_controller
+        model = controller.model
+        controller.set_scope(TableScope.ALL)
+        controller.set_sort(1, SortDirection.ASC)
+        pump_until(lambda: coordinator.runner.activity.physical == 0)
+        row_map = model.row_map
+        self.assertIs(row_map.scope, TableScope.ALL)
+        self.assertEqual(
+            [model.source_row_id_at(row) for row in range(model.rowCount())],
+            [2, 3, 1, 4],
+        )
+
+        self.assertTrue(
+            coordinator.state.commit_filters(
+                coordinator.state.revision,
+                (),
+                np.array([False, True, False, True], dtype=np.bool_),
+            )
+        )
+        APP.processEvents()
+
+        self.assertIs(model.row_map, row_map)
+        self.assertIs(model.row_map.scope, TableScope.ALL)
+        self.assertEqual(
+            [model.source_row_id_at(row) for row in range(model.rowCount())],
+            [2, 3, 1, 4],
+        )
+
+    def test_selected_sorted_still_rebuilds_on_selection_revision(self):
+        coordinator, shell = self.make()
+        self.commit(coordinator, dataset(pd.DataFrame({"x": [3, 1, 2, 4]})))
+        controller = coordinator.table_controller
+        model = controller.model
+        self.assertTrue(
+            coordinator.state.commit_filters(
+                coordinator.state.revision,
+                (),
+                np.array([True, False, True, False], dtype=np.bool_),
+            )
+        )
+        pump_until(lambda: model.rowCount() == 2)
+        controller.set_sort(1, SortDirection.ASC)
+        pump_until(lambda: coordinator.runner.activity.physical == 0)
+        self.assertEqual(
+            [model.source_row_id_at(row) for row in range(model.rowCount())],
+            [3, 1],
+        )
+
+        self.assertTrue(
+            coordinator.state.commit_filters(
+                coordinator.state.revision,
+                (),
+                np.array([False, True, False, True], dtype=np.bool_),
+            )
+        )
+        pump_until(lambda: coordinator.runner.activity.physical == 0)
+
+        self.assertIs(controller.scope, TableScope.SELECTED)
+        self.assertIs(model.row_map.scope, TableScope.SELECTED)
+        self.assertEqual(model.row_map.selection_revision, coordinator.state.selection_revision)
+        self.assertEqual(
+            [model.source_row_id_at(row) for row in range(model.rowCount())],
+            [2, 4],
+        )
+
     def test_all_scope_restarts_inflight_search_after_selection_revision(self):
         coordinator, shell = self.make()
         self.commit(
