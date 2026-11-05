@@ -47,7 +47,9 @@ class PlotPanel(QWidget):
 
     def show_figure(self, figure: Figure, description: str) -> None:
         """Prepare a candidate transactionally before replacing the active figure."""
-        candidate_owner = QWidget()
+        # Keep the private transaction root parent-owned so its C++ lifetime
+        # remains stable until DeferredDelete; it is never inserted in host/layout.
+        candidate_owner = QWidget(self)
         initial_canvas = getattr(figure, "canvas", None)
         canvas = None
         toolbar = None
