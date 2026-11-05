@@ -1,0 +1,261 @@
+name: F3.D Qt scatter
+
+on:
+  push:
+    branches:
+      - feat/f3-d-qt-scatter
+
+permissions:
+  contents: read
+
+jobs:
+  focal-python:
+    name: F3.D focal / Python ${{ matrix.python-version }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12"]
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONFAULTHANDLER: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Ubuntu Qt runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libegl1 libgl1 libopengl0 libfontconfig1 \
+            libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 \
+            libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 \
+            libxcb-util1 libxcb-xinerama0 libxcb-xkb1
+
+      - name: Install focal environment
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python -m pip install --upgrade pip
+          if [ "${{ matrix.python-version }}" = "3.12" ]; then
+            python -m pip install -c constraints-python312.txt -e '.[dev,qt]'
+          else
+            python -m pip install -e '.[dev,qt]'
+          fi
+
+      - name: F3.D focal
+        run: python -m unittest -v tests.test_qt_scatter
+
+  verify:
+    name: F3.D regression / structural / build / smokes
+    needs: focal-python
+    runs-on: ubuntu-22.04
+    timeout-minutes: 55
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONFAULTHANDLER: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify baseline ancestry
+        run: |
+          set -euxo pipefail
+          test "$(git merge-base HEAD 2dc1963a9f853f6373213c51cb3cd4b65b87e135)" = \
+            "2dc1963a9f853f6373213c51cb3cd4b65b87e135"
+          test -z "$(git status --porcelain)"
+          git rev-parse HEAD
+          git rev-parse HEAD^{tree}
+
+      - name: Install Ubuntu GUI runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            xvfb python3-tk libegl1 libgl1 libopengl0 libfontconfig1 \
+            libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 \
+            libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 \
+            libxcb-util1 libxcb-xinerama0 libxcb-xkb1
+
+      - name: Install development environment
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -c constraints-python312.txt -e '.[dev,qt]'
+
+      - name: F3.D focal
+        run: python -m unittest -v tests.test_qt_scatter | tee /tmp/f3d-tests.txt
+
+      - name: S-200K-SCATTER structural
+        run: python -m unittest -v tests.test_scatter_structural | tee /tmp/f3d-structural.txt
+
+      - name: Toolkit-neutral plot regression
+        run: python -m unittest -v tests.test_analysis_plots
+
+      - name: F3.C regression
+        run: python -m unittest -v tests.test_filters tests.test_qt_filters tests.test_filter_structural
+
+      - name: F3.B regression
+        run: python -m unittest -v tests.test_table tests.test_qt_table tests.test_table_structural
+
+      - name: F3.A regression
+        run: python -m unittest -v tests.test_qt_foundation
+
+      - name: Historical/core regression under Xvfb
+        env:
+          QT_QPA_PLATFORM: xcb
+        run: |
+          xvfb-run -a python -m unittest -v \
+            tests.test_application \
+            tests.test_data_state \
+            tests.test_export_callbacks \
+            tests.test_exports \
+            tests.test_gui \
+            tests.test_identity \
+            tests.test_jobs
+
+      - name: Ruff focal
+        run: |
+          python -m ruff check \
+            src/csv_analyzer/qt_app/coordinator.py \
+            src/csv_analyzer/qt_app/shell.py \
+            src/csv_analyzer/qt_app/plot_panel.py \
+            src/csv_analyzer/qt_app/scatter_view.py \
+            src/csv_analyzer/qt_app/scatter_controller.py \
+            tests/test_qt_scatter.py \
+            tests/test_scatter_structural.py
+          python -m ruff format --check \
+            src/csv_analyzer/qt_app/coordinator.py \
+            src/csv_analyzer/qt_app/shell.py \
+            src/csv_analyzer/qt_app/plot_panel.py \
+            src/csv_analyzer/qt_app/scatter_view.py \
+            src/csv_analyzer/qt_app/scatter_controller.py \
+            tests/test_qt_scatter.py \
+            tests/test_scatter_structural.py
+
+      - name: Build wheel and sdist
+        run: |
+          mkdir -p dist
+          python -m build
+          sha256sum dist/* | tee dist/SHA256SUMS
+
+      - name: Clean base install without Qt extra
+        shell: bash
+        run: |
+          set -euxo pipefail
+          WHEEL="$(readlink -f "$(ls dist/*.whl)")"
+          python -m venv /tmp/varia-f3d-base
+          /tmp/varia-f3d-base/bin/python -m pip install --upgrade pip
+          /tmp/varia-f3d-base/bin/pip install -c "$GITHUB_WORKSPACE/constraints-python312.txt" "$WHEEL"
+          /tmp/varia-f3d-base/bin/pip check
+          /tmp/varia-f3d-base/bin/python - <<'PY' | tee dist/base-environment.txt
+          import importlib.util
+          assert importlib.util.find_spec("PySide6") is None
+          import csv_analyzer.plots
+          print("base_pyside6=ABSENT")
+          print("plot_core_import=PASS")
+          PY
+
+      - name: CTk coexistence smoke
+        env:
+          QT_QPA_PLATFORM: xcb
+        run: |
+          mkdir -p /tmp/varia-f3d-runtime
+          cd /tmp/varia-f3d-runtime
+          env -u PYTHONPATH /tmp/varia-f3d-base/bin/varia-studio --help
+          env -u PYTHONPATH xvfb-run -a /tmp/varia-f3d-base/bin/python - <<'PY' \
+            | tee "$GITHUB_WORKSPACE/dist/ctk-smoke.txt"
+          from csv_analyzer.app import Application
+          app = Application()
+          app.update_idletasks()
+          print("ctk_coexistence=PASS")
+          app.close()
+          PY
+
+      - name: Clean Qt install from same wheel
+        shell: bash
+        run: |
+          set -euxo pipefail
+          WHEEL="$(readlink -f "$(ls dist/*.whl)")"
+          python -m venv /tmp/varia-f3d-qt
+          /tmp/varia-f3d-qt/bin/python -m pip install --upgrade pip
+          /tmp/varia-f3d-qt/bin/pip install \
+            -c "$GITHUB_WORKSPACE/constraints-python312.txt" "${WHEEL}[qt]"
+          /tmp/varia-f3d-qt/bin/pip check
+
+      - name: Installed QtAgg scatter smoke
+        shell: bash
+        run: |
+          cd /tmp/varia-f3d-runtime
+          cat > scatter-smoke.csv <<'EOF'
+          x,y,c
+          1,2,10
+          2,4,20
+          3,6,30
+          EOF
+          env -u PYTHONPATH QT_QPA_PLATFORM=offscreen \
+            /tmp/varia-f3d-qt/bin/python - <<'PY' | tee "$GITHUB_WORKSPACE/dist/qt-scatter-smoke.txt"
+          from pathlib import Path
+          from PySide6.QtCore import QEventLoop, QTimer
+          from csv_analyzer.qt_app.bootstrap import create_application
+          from csv_analyzer.qt_app.coordinator import Lifecycle
+
+          def pump(predicate):
+              if predicate():
+                  return
+              loop = QEventLoop()
+              timer = QTimer()
+              timer.setInterval(2)
+              timer.timeout.connect(lambda: loop.quit() if predicate() else None)
+              timer.start()
+              QTimer.singleShot(5000, loop.quit)
+              loop.exec()
+              assert predicate()
+
+          app, coordinator, shell = create_application()
+          coordinator.start()
+          shell.show()
+          coordinator.load_path(Path("scatter-smoke.csv"))
+          pump(lambda: shell.scatter_view.plot_button.isEnabled())
+          shell.tabs.setCurrentWidget(shell.scatter_view)
+          coordinator.scatter_controller.request_plot()
+          pump(lambda: coordinator.runner.activity.physical == 0)
+          assert shell.scatter_view.panel.has_figure
+          assert shell.scatter_view.panel.canvas is not None
+          assert shell.scatter_view.panel.toolbar is not None
+          assert "Save" not in [item[0] for item in shell.scatter_view.panel.toolbar.toolitems]
+          shell.close()
+          pump(lambda: coordinator.lifecycle is Lifecycle.CLOSED and not shell.isVisible())
+          print("qt_scatter_smoke=PASS")
+          print("qtplot_lifecycle=CLOSED")
+          PY
+
+      - name: Record evidence
+        run: |
+          cp /tmp/f3d-tests.txt dist/f3d-tests.txt
+          cp /tmp/f3d-structural.txt dist/f3d-structural.txt
+          {
+            echo "commit=$(git rev-parse HEAD)"
+            echo "tree=$(git rev-parse HEAD^{tree})"
+            echo "baseline=2dc1963a9f853f6373213c51cb3cd4b65b87e135"
+            echo "python=$(python --version 2>&1)"
+            echo "pyside6=$(python -c 'import PySide6; print(PySide6.__version__)')"
+            echo "matplotlib=$(python -c 'import matplotlib; print(matplotlib.__version__)')"
+          } | tee dist/f3d-environment.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: f3-d-evidence
+          path: dist/*
+          if-no-files-found: error

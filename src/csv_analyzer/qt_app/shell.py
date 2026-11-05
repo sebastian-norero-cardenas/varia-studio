@@ -10,10 +10,12 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
+from .scatter_view import ScatterView
 from .table_view import TableView
 
 
@@ -63,10 +65,24 @@ class QtShell(QMainWindow):
         actions.addStretch(1)
         layout.addLayout(actions)
 
-        self.table_view = TableView(self)
-        layout.addWidget(self.table_view, 1)
-        layout.addWidget(QLabel("Charts — not migrated yet"))
-        layout.addWidget(QLabel("Statistics — not migrated yet"))
+        self.tabs = QTabWidget(self)
+        self.data_tab = QWidget(self.tabs)
+        data_layout = QVBoxLayout(self.data_tab)
+        data_layout.setContentsMargins(0, 0, 0, 0)
+        self.table_view = TableView(self.data_tab)
+        data_layout.addWidget(self.table_view)
+        self.tabs.addTab(self.data_tab, "Data")
+
+        self.scatter_view = ScatterView(self.tabs)
+        self.tabs.addTab(self.scatter_view, "Relationships")
+
+        statistics = QWidget(self.tabs)
+        statistics_layout = QVBoxLayout(statistics)
+        statistics_layout.addWidget(QLabel("Statistics — not migrated yet"))
+        statistics_layout.addStretch(1)
+        self.tabs.addTab(statistics, "Statistics")
+
+        layout.addWidget(self.tabs, 1)
         self.setCentralWidget(root)
 
     def set_dataset(self, name: str | None, rows: int = 0, columns: int = 0) -> None:

@@ -20,6 +20,7 @@ from ..state import AppState, FilterRule, StateSnapshot
 from .diagnostics import best_effort_exception_log, best_effort_log
 from .errors import user_error_text
 from .filter_dialog import FilterDialog
+from .scatter_controller import ScatterController
 from .shell import QtShell
 from .table_controller import TableController
 from .tasks import (
@@ -137,7 +138,18 @@ class QtCoordinator(QObject):
             cancel_task=self.runner.cancel,
             parent=shell.table_view,
         )
+        self.scatter_controller = ScatterController(
+            shell.scatter_view,
+            snapshot_provider=self.snapshot,
+            submit_task=self.submit_task,
+            cancel_task=self.runner.cancel,
+            set_status=shell.set_status,
+            present_error=self._present_error,
+            gui_thread_id=self.gui_thread_id,
+            parent=shell.scatter_view,
+        )
         self.state.subscribe(self._on_state_changed)
+        self.scatter_controller.handle_state_change("dataset", self.state.snapshot())
         self._sync_filter_view(self.state.snapshot())
 
     def start(self) -> None:
@@ -394,6 +406,7 @@ class QtCoordinator(QObject):
             self._filter_dialog.reject()
         self._filter_dialog = None
         self.table_controller.begin_close()
+        self.scatter_controller.begin_close()
         self._publications.clear()
         shell = self._shell()
         if shell is not None:
@@ -526,6 +539,7 @@ class QtCoordinator(QObject):
         if reason == "dataset":
             self._cancel_filter_work()
         self.table_controller.handle_state_change(reason, snapshot)
+        self.scatter_controller.handle_state_change(reason, snapshot)
         shell = self._shell()
         dataset = self.state.dataset
         if shell is None:
