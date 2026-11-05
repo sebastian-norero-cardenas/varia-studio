@@ -15,7 +15,8 @@ from PySide6.QtCore import QEventLoop, QTimer
 from PySide6.QtWidgets import QApplication
 
 from csv_analyzer.data import CancelledError, Dataset, describe_columns
-from csv_analyzer.plots import HistogramSpec, prepare_histogram as real_prepare_histogram
+from csv_analyzer.plots import HistogramSpec
+from csv_analyzer.plots import prepare_histogram as real_prepare_histogram
 from csv_analyzer.qt_app.coordinator import Lifecycle, QtCoordinator
 from csv_analyzer.qt_app.shell import QtShell
 from csv_analyzer.state import FilterRule
