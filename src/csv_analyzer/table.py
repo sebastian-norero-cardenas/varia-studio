@@ -248,7 +248,7 @@ def _sort_key_factory(series: pd.Series):
     dtype = series.dtype
     if isinstance(dtype, pd.CategoricalDtype):
         if not dtype.ordered:
-            return canonical_text
+            return str
 
         categories = dtype.categories
         category_to_code = {value: index for index, value in enumerate(categories)}
