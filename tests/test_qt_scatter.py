@@ -314,6 +314,47 @@ class QtScatterTests(unittest.TestCase):
             pump_until(lambda: coordinator.runner.activity.physical == 0)
         self.assertFalse(shell.scatter_view.panel.has_figure)
 
+    def assert_active_tuple(self, panel, figure, canvas, toolbar):
+        self.assertIs(panel.figure, figure)
+        self.assertIs(panel.canvas, canvas)
+        self.assertIs(panel.toolbar, toolbar)
+        self.assertEqual(len(panel.host.findChildren(FigureCanvasQTAgg)), 1)
+        self.assertEqual(len(panel.host.findChildren(FigureToolbar)), 1)
+
+    def test_canvas_constructor_failure_is_transactional(self):
+        coordinator, shell = self.make()
+        self.commit(
+            coordinator,
+            dataset(pd.DataFrame({"x": [1.0, 2.0], "y": [2.0, 3.0]})),
+        )
+        self.plot_and_wait(coordinator)
+        panel = shell.scatter_view.panel
+        active = (panel.figure, panel.canvas, panel.toolbar)
+        destroyed = []
+
+        candidate = Figure()
+        candidate.add_subplot(111).plot([1.0, 2.0], [3.0, 4.0])
+        candidate_ref = weakref.ref(candidate)
+
+        class CanvasConstructionFailure(FigureCanvasQTAgg):
+            def __init__(self, figure):
+                super().__init__(figure)
+                self.destroyed.connect(lambda: destroyed.append(True))
+                raise RuntimeError("canvas constructor failed")
+
+        panel.canvas_class = CanvasConstructionFailure
+        with self.assertRaisesRegex(RuntimeError, "canvas constructor failed"):
+            panel.show_figure(candidate, "candidate B")
+        panel.canvas_class = FigureCanvasQTAgg
+        del candidate
+        gc.collect()
+        drain_qt_deletes()
+        gc.collect()
+
+        self.assert_active_tuple(panel, *active)
+        self.assertTrue(destroyed)
+        self.assertIsNone(candidate_ref())
+
     def test_toolbar_constructor_failure_is_transactional(self):
         coordinator, shell = self.make()
         self.commit(
@@ -322,9 +363,8 @@ class QtScatterTests(unittest.TestCase):
         )
         self.plot_and_wait(coordinator)
         panel = shell.scatter_view.panel
-        figure_a = panel.figure
-        canvas_a = panel.canvas
-        toolbar_a = panel.toolbar
+        active = (panel.figure, panel.canvas, panel.toolbar)
+        destroyed = []
 
         candidate = Figure()
         candidate.add_subplot(111).plot([1.0, 2.0], [3.0, 4.0])
@@ -333,6 +373,7 @@ class QtScatterTests(unittest.TestCase):
         class ToolbarConstructionFailure(FigureToolbar):
             def __init__(self, canvas, parent=None):
                 super().__init__(canvas, parent)
+                self.destroyed.connect(lambda: destroyed.append(True))
                 raise RuntimeError("toolbar constructor failed")
 
         panel.toolbar_class = ToolbarConstructionFailure
@@ -342,13 +383,44 @@ class QtScatterTests(unittest.TestCase):
         del candidate
         gc.collect()
         drain_qt_deletes()
+        gc.collect()
 
-        self.assertIs(panel.figure, figure_a)
-        self.assertIs(panel.canvas, canvas_a)
-        self.assertIs(panel.toolbar, toolbar_a)
-        self.assertEqual(len(panel.host.findChildren(FigureCanvasQTAgg)), 1)
-        self.assertEqual(len(panel.host.findChildren(FigureToolbar)), 1)
+        self.assert_active_tuple(panel, *active)
+        self.assertTrue(destroyed)
         self.assertIsNone(candidate_ref())
+
+    def test_repeated_toolbar_constructor_failure_does_not_accumulate_widgets(self):
+        coordinator, shell = self.make()
+        self.commit(
+            coordinator,
+            dataset(pd.DataFrame({"x": [1.0, 2.0], "y": [2.0, 3.0]})),
+        )
+        self.plot_and_wait(coordinator)
+        panel = shell.scatter_view.panel
+        active = (panel.figure, panel.canvas, panel.toolbar)
+        destroyed = []
+
+        class ToolbarConstructionFailure(FigureToolbar):
+            def __init__(self, canvas, parent=None):
+                super().__init__(canvas, parent)
+                self.destroyed.connect(lambda: destroyed.append(True))
+                raise RuntimeError("toolbar constructor failed")
+
+        panel.toolbar_class = ToolbarConstructionFailure
+        try:
+            for index in range(10):
+                candidate = Figure()
+                candidate.add_subplot(111).plot([1.0, 2.0], [3.0, 4.0])
+                with self.assertRaisesRegex(RuntimeError, "toolbar constructor failed"):
+                    panel.show_figure(candidate, f"candidate B{index}")
+                del candidate
+                gc.collect()
+                drain_qt_deletes()
+                self.assert_active_tuple(panel, *active)
+        finally:
+            panel.toolbar_class = FigureToolbar
+
+        self.assertEqual(len(destroyed), 10)
 
     def test_prepare_render_and_draw_failures_preserve_previous_figure(self):
         coordinator, shell = self.make()
@@ -358,21 +430,21 @@ class QtScatterTests(unittest.TestCase):
         )
         self.plot_and_wait(coordinator)
         panel = shell.scatter_view.panel
-        original = panel.figure
+        original = (panel.figure, panel.canvas, panel.toolbar)
 
         with patch(
             "csv_analyzer.qt_app.scatter_controller.prepare_scatter",
             side_effect=DataError("prepare failed"),
         ):
             self.plot_and_wait(coordinator)
-        self.assertIs(panel.figure, original)
+        self.assert_active_tuple(panel, *original)
 
         with patch(
             "csv_analyzer.qt_app.scatter_controller.render_scatter",
             side_effect=DataError("render failed"),
         ):
             self.plot_and_wait(coordinator)
-        self.assertIs(panel.figure, original)
+        self.assert_active_tuple(panel, *original)
 
         original_canvas_class = panel.canvas_class
 
@@ -382,7 +454,8 @@ class QtScatterTests(unittest.TestCase):
 
         panel.canvas_class = DrawFailureCanvas
         self.plot_and_wait(coordinator)
-        self.assertIs(panel.figure, original)
+        drain_qt_deletes()
+        self.assert_active_tuple(panel, *original)
         panel.canvas_class = original_canvas_class
 
     def test_replacement_keeps_single_canvas_toolbar_and_figure(self):
@@ -400,6 +473,9 @@ class QtScatterTests(unittest.TestCase):
             APP.processEvents()
             self.assertIsNotNone(view.panel.canvas)
             self.assertIsNotNone(view.panel.toolbar)
+            self.assertIs(view.panel.toolbar.canvas, view.panel.canvas)
+            self.assertIs(view.panel.canvas.toolbar, view.panel.toolbar)
+            self.assertNotIn("Save", [item[0] for item in view.panel.toolbar.toolitems])
             self.assertEqual(
                 sum(
                     isinstance(view.panel.host_layout.itemAt(i).widget(), FigureCanvasQTAgg)
