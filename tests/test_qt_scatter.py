@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import gc
 import os
 import threading
 import unittest
+import weakref
 from pathlib import Path
 from unittest.mock import patch
 
@@ -13,7 +15,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import numpy as np
 import pandas as pd
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
-from PySide6.QtCore import QEventLoop, QTimer
+from matplotlib.figure import Figure
+from PySide6.QtCore import QCoreApplication, QEvent, QEventLoop, QTimer
 from PySide6.QtWidgets import QApplication
 
 from csv_analyzer.data import CancelledError, DataError, Dataset, describe_columns
@@ -58,6 +61,12 @@ def pump_until(predicate, timeout_ms=6000):
 
 def dataset(frame: pd.DataFrame, name="dataset.csv") -> Dataset:
     return Dataset(frame=frame, path=Path(name), columns=describe_columns(frame))
+
+
+def drain_qt_deletes():
+    APP.processEvents()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    APP.processEvents()
 
 
 class RecordingShell(QtShell):
@@ -304,6 +313,42 @@ class QtScatterTests(unittest.TestCase):
             release.set()
             pump_until(lambda: coordinator.runner.activity.physical == 0)
         self.assertFalse(shell.scatter_view.panel.has_figure)
+
+    def test_toolbar_constructor_failure_is_transactional(self):
+        coordinator, shell = self.make()
+        self.commit(
+            coordinator,
+            dataset(pd.DataFrame({"x": [1.0, 2.0], "y": [2.0, 3.0]})),
+        )
+        self.plot_and_wait(coordinator)
+        panel = shell.scatter_view.panel
+        figure_a = panel.figure
+        canvas_a = panel.canvas
+        toolbar_a = panel.toolbar
+
+        candidate = Figure()
+        candidate.add_subplot(111).plot([1.0, 2.0], [3.0, 4.0])
+        candidate_ref = weakref.ref(candidate)
+
+        class ToolbarConstructionFailure(FigureToolbar):
+            def __init__(self, canvas, parent=None):
+                super().__init__(canvas, parent)
+                raise RuntimeError("toolbar constructor failed")
+
+        panel.toolbar_class = ToolbarConstructionFailure
+        with self.assertRaisesRegex(RuntimeError, "toolbar constructor failed"):
+            panel.show_figure(candidate, "candidate B")
+        panel.toolbar_class = FigureToolbar
+        del candidate
+        gc.collect()
+        drain_qt_deletes()
+
+        self.assertIs(panel.figure, figure_a)
+        self.assertIs(panel.canvas, canvas_a)
+        self.assertIs(panel.toolbar, toolbar_a)
+        self.assertEqual(len(panel.host.findChildren(FigureCanvasQTAgg)), 1)
+        self.assertEqual(len(panel.host.findChildren(FigureToolbar)), 1)
+        self.assertIsNone(candidate_ref())
 
     def test_prepare_render_and_draw_failures_preserve_previous_figure(self):
         coordinator, shell = self.make()
