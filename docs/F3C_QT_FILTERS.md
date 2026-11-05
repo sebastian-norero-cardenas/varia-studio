@@ -5,6 +5,17 @@ consumed by F3.B. It reuses the existing toolkit-neutral `FilterRule`,
 `build_filter_mask()` and `AppState.commit_filters()` contracts; it does not
 add filter types or change scientific semantics.
 
+## Integration record
+
+F3.C was integrated into `main` by fast-forward from candidate
+`61bc76efb07c1c561262f123497ae58240b3264b` (tree
+`e8e19d3c13a143eb2b3f9e1474ce4aade5a402e1`). `QA06-F3C-01 = VERIFIED`,
+including the physical X11 UI gate.
+
+`F3A-SIGSEGV-CI = INDETERMINATE` remains a separate incident. It did not
+reappear during QA06-F3C-01, is not considered resolved, and was not
+investigated as part of the F3.C integration.
+
 ## Semantics
 
 Only `Dataset.numeric_columns` are offered. Rules are inclusive numeric bounds
