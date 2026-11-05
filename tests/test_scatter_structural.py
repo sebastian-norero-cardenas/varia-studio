@@ -6,8 +6,6 @@ import os
 import threading
 import unittest
 from pathlib import Path
-from unittest.mock import patch
-
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import numpy as np
@@ -16,7 +14,8 @@ from PySide6.QtCore import QEventLoop, QTimer
 from PySide6.QtWidgets import QApplication
 
 from csv_analyzer.data import CancelledError, Dataset, describe_columns
-from csv_analyzer.plots import ScatterSpec, prepare_scatter as real_prepare_scatter
+from csv_analyzer.plots import ScatterSpec
+from csv_analyzer.plots import prepare_scatter as real_prepare_scatter
 from csv_analyzer.qt_app.coordinator import Lifecycle, QtCoordinator
 from csv_analyzer.qt_app.shell import QtShell
 from csv_analyzer.state import FilterRule
