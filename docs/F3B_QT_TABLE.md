@@ -3,6 +3,24 @@
 F3.B adds the first functional Qt data exploration view on top of the closed F3.A
 foundation. It does not migrate charts, statistics, filters, editing or export.
 
+## Integration record
+
+F3.B was integrated into `main` by fast-forward from candidate
+`507e1ec3014ee8cf578c1cbee835efa0fa728182` (tree
+`02b3902db708996765c187e91416e76789377e19`). `QA06-F3B-02 = VERIFIED`.
+
+`AUD-F3B-01` previously returned NO-GO with two MEDIUM findings: a
+Selected-to-All materialization race during selection-revision changes, and
+unordered categoricals being sorted by internal category codes. Both findings
+were corrected in R2 and subsequently adjudicated closed by 01B.
+
+`F3A-SIGSEGV-CI = INDETERMINATE` remains a separate, non-blocking incident
+for F3.B. Four CI attempts observed a SIGSEGV in the F3.A Qt-foundation test
+`test_callback_and_dataset_commit_run_on_gui_thread`; a fifth attempt passed.
+QA additionally executed 70 independent processes with 70/70 PASS and no
+SIGSEGV. The incident is not considered resolved and remains for follow-up if
+it reappears or before a relevant release gate.
+
 ## Architecture
 
 The data path is:
@@ -55,9 +73,13 @@ array. No per-row Python dictionary is used.
 
 A dataset revision resets table scope to Selected, sort/search state, visual
 selection and focus, and replaces Dataset + RowMap inside a model reset. A
-selection-only revision rebuilds the RowMap only in Selected scope. All scope
-keeps its existing row map because analytical selection does not change its
-contents.
+selection-only revision rebuilds the RowMap in Selected scope. In All scope, an
+already materialized RowMap remains valid across later selection revisions only
+when its dataset revision, scope and sort still satisfy the desired visual
+projection. A pending Selected-to-All transition therefore retries
+materialization if a selection-revision change makes the original asynchronous
+result stale; a correctly materialized All RowMap is not rebuilt merely because
+the analytical selection changes.
 
 ## Sort semantics
 
@@ -69,7 +91,10 @@ One real dataset column can be active at a time.
 - Integer and nullable-integer sorting converts individual scalar values to
   Python integers, never the complete column to float or text.
 - Float infinities remain numeric.
-- Boolean, categorical and typed datetime columns keep typed ordering.
+- Boolean and typed datetime columns keep typed ordering.
+- Ordered categoricals respect their declared category order; unordered
+  categoricals sort by deterministic textual representation rather than
+  internal category codes.
 - Object/mixed columns use a deterministic type-ranked fallback.
 - Reset sort restores Source Row ID ascending within the current scope.
 
