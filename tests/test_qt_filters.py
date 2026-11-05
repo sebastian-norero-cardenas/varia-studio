@@ -397,8 +397,7 @@ class QtFilterTests(unittest.TestCase):
         row2 = controller.model.visible_row_for_source_id(2)
         selection_model.select(
             controller.model.index(row2, 0),
-            QItemSelectionModel.SelectionFlag.Select
-            | QItemSelectionModel.SelectionFlag.Rows,
+            QItemSelectionModel.SelectionFlag.Select | QItemSelectionModel.SelectionFlag.Rows,
         )
 
         self.apply_and_wait(coordinator, (FilterRule("x", lower=2),))
