@@ -70,9 +70,10 @@ class RecordingShell(QtShell):
 
 
 class QtScatterTests(unittest.TestCase):
-    def make(self):
+    def make(self, *, loader=None):
         shell = RecordingShell()
-        coordinator = QtCoordinator(shell)
+        kwargs = {} if loader is None else {"loader": loader}
+        coordinator = QtCoordinator(shell, **kwargs)
         coordinator.start()
         self.addCleanup(self.cleanup, coordinator, shell)
         return coordinator, shell
@@ -230,16 +231,18 @@ class QtScatterTests(unittest.TestCase):
         self.assertIn("z", prepared)
 
     def test_dataset_and_selection_changes_invalidate_plot_but_failed_load_does_not(self):
-        coordinator, shell = self.make()
+        def failing_loader(*_args, **_kwargs):
+            raise DataError("load failed")
+
+        coordinator, shell = self.make(loader=failing_loader)
         first = dataset(pd.DataFrame({"x": [1.0, 2.0], "y": [2.0, 3.0]}), "a.csv")
         second = dataset(pd.DataFrame({"u": [1.0, 2.0], "v": [5.0, 6.0]}), "b.csv")
         self.commit(coordinator, first)
         self.plot_and_wait(coordinator)
         old_figure = shell.scatter_view.panel.figure
 
-        ticket = coordinator.state.begin_load()
-        coordinator.state.fail_load(ticket)
-        APP.processEvents()
+        coordinator.load_path("failed.csv")
+        pump_until(lambda: coordinator.runner.activity.physical == 0)
         self.assertIs(shell.scatter_view.panel.figure, old_figure)
 
         snapshot = coordinator.state.snapshot()
