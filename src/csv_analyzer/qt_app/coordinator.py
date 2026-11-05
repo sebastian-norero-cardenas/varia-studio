@@ -14,10 +14,12 @@ import shiboken6
 from PySide6.QtCore import QObject, Slot
 from PySide6.QtWidgets import QFileDialog
 
+from ..analysis import build_filter_mask
 from ..data import CancelledError, Dataset, ImportOptions, load_dataset
-from ..state import AppState
+from ..state import AppState, FilterRule, StateSnapshot
 from .diagnostics import best_effort_exception_log, best_effort_log
 from .errors import user_error_text
+from .filter_dialog import FilterDialog
 from .shell import QtShell
 from .table_controller import TableController
 from .tasks import (
@@ -113,6 +115,7 @@ class QtCoordinator(QObject):
         self._shell_ref = weakref.ref(shell)
         self._loader = loader
         self._publications: dict[str, _Publication] = {}
+        self._filter_dialog: FilterDialog | None = None
 
         self.runner = QtTaskRunner(
             self,
@@ -126,6 +129,7 @@ class QtCoordinator(QObject):
         shell.open_requested.connect(self.open_file)
         shell.cancel_requested.connect(self.cancel_all)
         shell.close_requested.connect(self.begin_close)
+        shell.table_view.filters_requested.connect(self.open_filter_editor)
         self.table_controller = TableController(
             shell.table_view,
             snapshot_provider=self.snapshot,
@@ -134,6 +138,7 @@ class QtCoordinator(QObject):
             parent=shell.table_view,
         )
         self.state.subscribe(self._on_state_changed)
+        self._sync_filter_view(self.state.snapshot())
 
     def start(self) -> None:
         if self.lifecycle is not Lifecycle.STARTING:
@@ -235,6 +240,138 @@ class QtCoordinator(QObject):
         )
 
     @Slot()
+    def open_filter_editor(self) -> FilterDialog | None:
+        if self.lifecycle is not Lifecycle.RUNNING:
+            return None
+        snapshot = self.state.snapshot()
+        dataset = snapshot.dataset
+        if dataset is None or not dataset.numeric_columns:
+            return None
+        if self._filter_dialog is not None and shiboken6.isValid(self._filter_dialog):
+            self._filter_dialog.raise_()
+            self._filter_dialog.activateWindow()
+            return self._filter_dialog
+
+        shell = self._shell()
+        dialog = FilterDialog(
+            dataset,
+            snapshot.filters,
+            revision=snapshot.revision,
+            dataset_revision=snapshot.dataset_revision,
+            selection_revision=snapshot.selection_revision,
+            parent=shell,
+        )
+        dialog.apply_requested.connect(self._on_filter_apply_requested)
+        dialog.finished.connect(self._on_filter_dialog_finished)
+        self._filter_dialog = dialog
+        dialog.open()
+        return dialog
+
+    @Slot(int)
+    def _on_filter_dialog_finished(self, _result: int) -> None:
+        self._filter_dialog = None
+
+    @Slot(object, int, int, int)
+    def _on_filter_apply_requested(
+        self,
+        rules: object,
+        revision: int,
+        dataset_revision: int,
+        selection_revision: int,
+    ) -> None:
+        dialog = self.sender()
+        feedback_target = dialog if isinstance(dialog, FilterDialog) else None
+        accepted = self.apply_filters(
+            tuple(rules),
+            expected_revision=revision,
+            expected_dataset_revision=dataset_revision,
+            expected_selection_revision=selection_revision,
+            feedback_target=feedback_target,
+        )
+        if accepted and feedback_target is not None:
+            feedback_target.accept()
+
+    def apply_filters(
+        self,
+        rules: tuple[FilterRule, ...],
+        *,
+        expected_revision: int | None = None,
+        expected_dataset_revision: int | None = None,
+        expected_selection_revision: int | None = None,
+        feedback_target: FilterDialog | None = None,
+    ) -> bool:
+        if self.lifecycle is not Lifecycle.RUNNING:
+            return False
+        snapshot = self.state.snapshot()
+        if snapshot.dataset is None:
+            return False
+
+        expected_revision = snapshot.revision if expected_revision is None else expected_revision
+        expected_dataset_revision = (
+            snapshot.dataset_revision
+            if expected_dataset_revision is None
+            else expected_dataset_revision
+        )
+        expected_selection_revision = (
+            snapshot.selection_revision
+            if expected_selection_revision is None
+            else expected_selection_revision
+        )
+        if (
+            snapshot.revision != expected_revision
+            or snapshot.dataset_revision != expected_dataset_revision
+            or snapshot.selection_revision != expected_selection_revision
+        ):
+            message = "The dataset or selection changed. Reopen the filter editor."
+            if feedback_target is not None:
+                feedback_target.set_feedback(message)
+            shell = self._shell()
+            if shell is not None:
+                shell.set_status(message)
+            return False
+
+        rules = tuple(rules)
+        if not rules:
+            self._cancel_filter_work()
+            committed = self.state.commit_filters(snapshot.revision, (), None)
+            if committed:
+                shell = self._shell()
+                if shell is not None:
+                    shell.set_status(
+                        f"Filters cleared · {self.state.selected_count:,} selected rows"
+                    )
+            return committed
+
+        frame = snapshot.dataset.frame
+        revision = snapshot.revision
+
+        def success(mask) -> None:
+            if self.state.commit_filters(revision, rules, mask):
+                shell = self._shell()
+                if shell is not None:
+                    shell.set_status(
+                        f"Filters applied · {self.state.selected_count:,} selected rows"
+                    )
+
+        token = self.submit_task(
+            "filters",
+            lambda cancel: build_filter_mask(frame, rules, cancel),
+            success=success,
+            failure=self._present_error,
+            receiver=self,
+            exclusive_group="filters",
+        )
+        if token is not None:
+            shell = self._shell()
+            if shell is not None:
+                shell.set_status("Applying filters…")
+        return token is not None
+
+    def _cancel_filter_work(self) -> None:
+        self._publications.pop("filters", None)
+        self.runner.cancel("filters")
+
+    @Slot()
     def cancel_all(self) -> None:
         if self.lifecycle is not Lifecycle.RUNNING:
             return
@@ -253,6 +390,9 @@ class QtCoordinator(QObject):
         self.lifecycle = Lifecycle.CLOSING
         self.application_epoch += 1
         self.state.cancel_load()
+        if self._filter_dialog is not None and shiboken6.isValid(self._filter_dialog):
+            self._filter_dialog.reject()
+        self._filter_dialog = None
         self.table_controller.begin_close()
         self._publications.clear()
         shell = self._shell()
@@ -383,6 +523,8 @@ class QtCoordinator(QObject):
 
     def _on_state_changed(self, reason: str) -> None:
         snapshot = self.state.snapshot()
+        if reason == "dataset":
+            self._cancel_filter_work()
         self.table_controller.handle_state_change(reason, snapshot)
         shell = self._shell()
         dataset = self.state.dataset
@@ -390,8 +532,19 @@ class QtCoordinator(QObject):
             return
         if dataset is None:
             shell.set_dataset(None)
+        else:
+            shell.set_dataset(dataset.path.name, len(dataset.frame), len(dataset.columns))
+        self._sync_filter_view(snapshot)
+
+    def _sync_filter_view(self, snapshot: StateSnapshot) -> None:
+        shell = self._shell()
+        if shell is None:
             return
-        shell.set_dataset(dataset.path.name, len(dataset.frame), len(dataset.columns))
+        dataset = snapshot.dataset
+        shell.table_view.set_filter_state(
+            len(snapshot.filters),
+            enabled=dataset is not None and bool(dataset.numeric_columns),
+        )
 
     def _present_error(self, error: BaseException) -> None:
         if isinstance(error, CancelledError):

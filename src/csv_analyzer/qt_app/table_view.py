@@ -32,6 +32,7 @@ class TableView(QWidget):
     show_all_requested = Signal()
     go_requested = Signal(str)
     copy_requested = Signal()
+    filters_requested = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -44,6 +45,11 @@ class TableView(QWidget):
         self.scope_combo.addItem("All rows", TableScope.ALL)
         self.scope_combo.currentIndexChanged.connect(self._emit_scope)
         scope_row.addWidget(self.scope_combo)
+
+        self.filter_button = QPushButton("Filters · none")
+        self.filter_button.setEnabled(False)
+        self.filter_button.clicked.connect(self.filters_requested)
+        scope_row.addWidget(self.filter_button)
 
         self.reset_sort_button = QPushButton("Reset sort")
         self.reset_sort_button.clicked.connect(self.reset_sort_requested)
@@ -193,6 +199,15 @@ class TableView(QWidget):
         blocked = self.search_edit.blockSignals(True)
         self.search_edit.setText(text)
         self.search_edit.blockSignals(blocked)
+
+    def set_filter_state(self, rule_count: int, *, enabled: bool) -> None:
+        self.filter_button.setText(f"Filters · {rule_count if rule_count else 'none'}")
+        self.filter_button.setEnabled(enabled)
+        self.filter_button.setToolTip(
+            "Edit inclusive numeric filters on raw dataset values."
+            if enabled
+            else "Numeric filters require a dataset with at least one numeric column."
+        )
 
     def set_counts(self, scope: TableScope, visible: int, selected: int, total: int) -> None:
         if scope is TableScope.SELECTED:
