@@ -25,6 +25,7 @@ from csv_analyzer.qt_app.coordinator import Lifecycle, QtCoordinator
 from csv_analyzer.qt_app.plot_panel import FigureToolbar
 from csv_analyzer.qt_app.shell import QtShell
 from csv_analyzer.state import FilterRule
+from csv_analyzer.table import SearchMode, SortDirection, TableScope
 
 APP = QApplication.instance() or QApplication(["varia-f3e-tests"])
 
@@ -119,6 +120,12 @@ class QtHistogramTests(unittest.TestCase):
         view = shell.histogram_view
         labels = [shell.tabs.tabText(index) for index in range(shell.tabs.count())]
         self.assertEqual(labels, ["Data", "Relationships", "Distributions", "Statistics"])
+        self.assertFalse(view.plot_button.isEnabled())
+
+        self.commit(
+            coordinator,
+            dataset(pd.DataFrame({"x": pd.Series([], dtype="float64")}), "empty.csv"),
+        )
         self.assertFalse(view.plot_button.isEnabled())
 
         self.commit(coordinator, dataset(pd.DataFrame({"name": ["a", "b"], "flag": [True, False]})))
@@ -426,6 +433,82 @@ class QtHistogramTests(unittest.TestCase):
         self.assertFalse(shell.histogram_view.panel.has_figure)
         self.assertEqual(shell.histogram_view.column.currentText(), "u")
 
+    def test_cancelled_load_preserves_histogram_and_controls(self):
+        entered = threading.Event()
+        release = threading.Event()
+
+        def cancellable_loader(path, options, *, cancel=None):
+            entered.set()
+            release.wait(timeout=5)
+            if cancel is not None and cancel.is_set():
+                raise CancelledError()
+            return dataset(pd.DataFrame({"u": [10.0, 20.0]}), "replacement.csv")
+
+        coordinator, shell = self.make(loader=cancellable_loader)
+        self.commit(coordinator, dataset(pd.DataFrame({"x": [1.0, 2.0, 3.0]}), "active.csv"))
+        self.plot_and_wait(coordinator)
+        old_figure = shell.histogram_view.panel.figure
+        old_column = shell.histogram_view.column.currentText()
+
+        coordinator.load_path("replacement.csv")
+        self.assertTrue(entered.wait(timeout=2))
+        coordinator.cancel_all()
+        release.set()
+        pump_until(lambda: coordinator.runner.activity.physical == 0)
+
+        self.assertIs(shell.histogram_view.panel.figure, old_figure)
+        self.assertEqual(shell.histogram_view.column.currentText(), old_column)
+        self.assertEqual(coordinator.state.dataset.path.name, "active.csv")
+
+    def test_pending_histogram_is_invalidated_by_selection_revision_change(self):
+        coordinator, shell = self.make()
+        self.commit(coordinator, dataset(pd.DataFrame({"x": [1.0, 2.0, 3.0, 4.0]})))
+        entered = threading.Event()
+        release = threading.Event()
+
+        def slow(frame, spec, mask=None, *, cancel=None):
+            entered.set()
+            release.wait(timeout=5)
+            if cancel is not None and cancel.is_set():
+                raise CancelledError()
+            return real_prepare_histogram(frame, spec, mask, cancel=cancel)
+
+        with patch("csv_analyzer.qt_app.histogram_controller.prepare_histogram", slow):
+            coordinator.histogram_controller.request_plot()
+            self.assertTrue(entered.wait(timeout=2))
+            self.assertTrue(coordinator.apply_filters((FilterRule("x", lower=3),)))
+            pump_until(lambda: coordinator.state.selected_count == 2)
+            release.set()
+            pump_until(lambda: coordinator.runner.activity.physical == 0)
+
+        self.assertFalse(shell.histogram_view.panel.has_figure)
+        self.assertIsNone(coordinator.histogram_controller.current_counts)
+        self.assertIn("Selection changed", shell.histogram_view.local_status.text())
+
+    def test_table_scope_sort_and_search_do_not_change_histogram_selection(self):
+        coordinator, shell = self.make()
+        frame = pd.DataFrame(
+            {
+                "x": [1.0, 2.0, 3.0, 4.0],
+                "label": ["alpha", "beta", "alpha", "beta"],
+            }
+        )
+        self.commit(coordinator, dataset(frame))
+        self.assertTrue(coordinator.apply_filters((FilterRule("x", lower=3),)))
+        pump_until(lambda: coordinator.runner.activity.physical == 0)
+
+        table = coordinator.table_controller
+        table.set_scope(TableScope.ALL)
+        table.set_sort(1, SortDirection.DESC)
+        pump_until(lambda: coordinator.runner.activity.physical == 0)
+        table.set_search("beta", SearchMode.EXACT)
+        pump_until(lambda: table.search_result is not None)
+
+        self.plot_and_wait(coordinator)
+        self.assertEqual(coordinator.state.selected_count, 2)
+        self.assertEqual(coordinator.histogram_controller.current_counts[1], 2)
+        self.assertEqual(coordinator.histogram_controller.current_counts[3], 2)
+
     def test_prepare_render_draw_failures_preserve_valid_figure(self):
         coordinator, shell = self.make()
         self.commit(coordinator, dataset(pd.DataFrame({"x": [1.0, 2.0, 3.0]})))
@@ -505,6 +588,11 @@ class QtHistogramTests(unittest.TestCase):
                     view.axis.scale.setCurrentIndex(0)
                     view.log_bins.setChecked(False)
                 self.plot_and_wait(coordinator)
+                if index == 2:
+                    active_zero = view.panel.figure
+                    view.axis.scale.setCurrentIndex(1)
+                    self.plot_and_wait(coordinator)
+                    self.assertIs(view.panel.figure, active_zero)
 
         self.commit(coordinator, dataset(pd.DataFrame({"x": [1.0, 2.0, 3.0]}), "bounds.csv"))
         view = shell.histogram_view
