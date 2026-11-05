@@ -13,7 +13,6 @@ import numpy as np
 import pandas as pd
 from pandas.api.types import (
     is_bool_dtype,
-    is_categorical_dtype,
     is_datetime64_any_dtype,
     is_float_dtype,
     is_integer_dtype,
@@ -247,8 +246,11 @@ def _mixed_sort_key(value: object) -> tuple[object, ...]:
 
 def _sort_key_factory(series: pd.Series):
     dtype = series.dtype
-    if is_categorical_dtype(dtype):
-        categories = series.cat.categories
+    if isinstance(dtype, pd.CategoricalDtype):
+        if not dtype.ordered:
+            return canonical_text
+
+        categories = dtype.categories
         category_to_code = {value: index for index, value in enumerate(categories)}
 
         def categorical_key(value: object):

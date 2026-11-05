@@ -125,10 +125,11 @@ class TableController(QObject):
             return
 
         row_map = self.model.row_map
-        order_needs_restart = self.sort_spec is not None and (
-            row_map is None or row_map.sort_spec != self.sort_spec
+        projection_needs_restart = not self._row_map_matches_requested_projection(
+            row_map,
+            snapshot,
         )
-        if order_needs_restart:
+        if projection_needs_restart:
             self.table_epoch += 1
             self._request_row_map(snapshot, recalculate_search=search_pending)
         elif search_pending and self.search_spec is not None:
@@ -176,6 +177,26 @@ class TableController(QObject):
         if search_pending:
             self._cancel_pending_search()
         return search_pending
+
+    def _row_map_matches_requested_projection(
+        self,
+        row_map: RowMap | None,
+        snapshot: StateSnapshot,
+    ) -> bool:
+        if row_map is None:
+            return False
+        if row_map.dataset_revision != snapshot.dataset_revision:
+            return False
+        if row_map.scope is not self.scope:
+            return False
+        if row_map.sort_spec != self.sort_spec:
+            return False
+        if (
+            self.scope is TableScope.SELECTED
+            and row_map.selection_revision != snapshot.selection_revision
+        ):
+            return False
+        return True
 
     def set_scope(self, scope: TableScope) -> None:
         if not isinstance(scope, TableScope) or scope is self.scope:
