@@ -160,6 +160,22 @@ class PlotPanel(QWidget):
                 shiboken6.delete(widget)
 
     @staticmethod
+    def _neutralize_pending_draw(canvas) -> None:
+        """Cancel a queued QtAgg draw_idle before detaching its Figure.
+
+        Matplotlib 3.8-3.10 schedules _draw_idle through a zero-delay Qt
+        timer and gates the callback with the private _draw_pending flag.
+        Access stays defensive so a backend/version without that detail is a
+        no-op rather than a lifecycle failure.
+        """
+        if canvas is None or not getattr(canvas, "_draw_pending", False):
+            return
+        try:
+            setattr(canvas, "_draw_pending", False)
+        except (AttributeError, RuntimeError):
+            pass
+
+    @staticmethod
     def _break_toolbar_links(canvas, toolbar) -> None:
         if canvas is None or toolbar is None:
             return
@@ -189,6 +205,9 @@ class PlotPanel(QWidget):
     def _dispose_tuple(figure, canvas, toolbar) -> None:
         if figure is None and canvas is None and toolbar is None:
             return
+        # A queued Qt callback may outlive this published tuple. Neutralize it
+        # while canvas.figure is still valid, before any Figure detachment.
+        PlotPanel._neutralize_pending_draw(canvas)
         PlotPanel._break_toolbar_links(canvas, toolbar)
 
         if toolbar is not None:
