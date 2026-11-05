@@ -3,6 +3,21 @@
 F3.D establishes the first scientific Qt visualization while preserving the
 existing toolkit-neutral scatter engine in `plots.py`.
 
+## Final integration record
+
+F3.D was integrated into `main` by fast-forward from final R2 candidate
+`d61f6f52a72d7f31ecd9799f9c158822569d7a7c` (tree `f9ad0f517bc7d96e0a840f4e7f01476b56519f67`).
+
+Final verification state:
+
+- `QA06-F3D-01-R2 = VERIFIED`.
+- `F3D-QA-01 = CLOSED` in R1.
+- `F3D-QA-02 = CLOSED` in R2.
+- Physical X11 UI gate: PASS.
+- Physical rapid-navigation / draw_idle R2 gate: PASS.
+- `F3A-SIGSEGV-CI = INDETERMINATE`; it did not reappear during final F3.D
+  validation and is not considered resolved.
+
 ## Ownership and boundary
 
 `ScatterView` owns only controls and staged view configuration.
