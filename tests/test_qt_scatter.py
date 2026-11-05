@@ -477,6 +477,7 @@ class QtScatterTests(unittest.TestCase):
         figure_b = Figure()
         figure_b.add_subplot(111).plot([1.0, 2.0], [4.0, 5.0])
         panel.show_figure(figure_b, "candidate B")
+        self.assertFalse(getattr(canvas_a, "_draw_pending", False))
         late_callback()
         drain_qt_deletes()
 
@@ -507,6 +508,7 @@ class QtScatterTests(unittest.TestCase):
         figure_b = Figure()
         figure_b.add_subplot(111).plot([1.0, 2.0], [5.0, 6.0])
         panel.show_figure(figure_b, "candidate B")
+        self.assertFalse(getattr(canvas_a, "_draw_pending", False))
         late_callback()
         drain_qt_deletes()
 
@@ -537,6 +539,7 @@ class QtScatterTests(unittest.TestCase):
                 [float(index), float(index + 1)],
             )
             panel.show_figure(next_figure, f"candidate {index}")
+            self.assertFalse(getattr(retired_canvas, "_draw_pending", False))
             late_callback()
             drain_qt_deletes()
 
