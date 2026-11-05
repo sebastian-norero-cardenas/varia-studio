@@ -17,7 +17,7 @@ from PySide6.QtCore import QEventLoop, QTimer
 from PySide6.QtWidgets import QApplication
 
 from csv_analyzer.data import CancelledError, DataError, Dataset, describe_columns
-from csv_analyzer.plots import ScatterSpec, prepare_scatter as real_prepare_scatter
+from csv_analyzer.plots import prepare_scatter as real_prepare_scatter
 from csv_analyzer.plots import render_scatter as real_render_scatter
 from csv_analyzer.qt_app.coordinator import Lifecycle, QtCoordinator
 from csv_analyzer.qt_app.plot_panel import FigureToolbar
