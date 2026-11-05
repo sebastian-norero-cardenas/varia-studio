@@ -10,9 +10,7 @@ from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 class FigureToolbar(NavigationToolbar2QT):
     """Matplotlib navigation without the backend's independent Save workflow."""
 
-    toolitems = tuple(
-        item for item in NavigationToolbar2QT.toolitems if item[0] != "Save"
-    )
+    toolitems = tuple(item for item in NavigationToolbar2QT.toolitems if item[0] != "Save")
 
 
 class PlotPanel(QWidget):
