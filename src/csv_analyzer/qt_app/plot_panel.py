@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shiboken6
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
 from matplotlib.figure import Figure
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
@@ -75,7 +76,8 @@ class PlotPanel(QWidget):
             )
             raise
 
-        candidate_owner.deleteLater()
+        if shiboken6.isValid(candidate_owner):
+            shiboken6.delete(candidate_owner)
         old = (self.figure, self.canvas, self.toolbar)
         self.figure, self.canvas, self.toolbar = figure, canvas, toolbar
         self.empty_label.hide()
@@ -116,10 +118,10 @@ class PlotPanel(QWidget):
             if attached is not initial_canvas:
                 candidate_canvas = attached
 
-        linked_toolbar = toolbar
-        if linked_toolbar is None and candidate_canvas is not None:
-            linked_toolbar = getattr(candidate_canvas, "toolbar", None)
-        cls._break_toolbar_links(candidate_canvas, linked_toolbar)
+        # A toolbar that returned normally is safe to detach explicitly. If its
+        # constructor raised before returning, do not touch the partial wrapper:
+        # candidate_owner is its Qt owner and will destroy it synchronously.
+        cls._break_toolbar_links(candidate_canvas, toolbar)
 
         try:
             figure.clear()
@@ -138,21 +140,24 @@ class PlotPanel(QWidget):
             except Exception:
                 pass
 
-        # Anything still below candidate_owner, including a toolbar whose
-        # Python constructor raised before returning, is destroyed with this
-        # private ownership boundary after Qt processes DeferredDelete.
+        orphans = []
         for widget in (toolbar, candidate_canvas):
-            if widget is None:
+            if widget is None or not shiboken6.isValid(widget):
                 continue
             try:
-                if widget.parent() is candidate_owner:
-                    continue
-                widget.hide()
-                widget.setParent(None)
-                widget.deleteLater()
+                if widget.parent() is not candidate_owner:
+                    widget.setParent(candidate_owner)
             except RuntimeError:
-                pass
-        candidate_owner.deleteLater()
+                orphans.append(widget)
+
+        # show_figure always runs on the GUI thread. Immediate deletion avoids
+        # leaving partially constructed PySide wrappers pending in DeferredDelete
+        # while the next figure is being built.
+        if shiboken6.isValid(candidate_owner):
+            shiboken6.delete(candidate_owner)
+        for widget in orphans:
+            if shiboken6.isValid(widget):
+                shiboken6.delete(widget)
 
     @staticmethod
     def _break_toolbar_links(canvas, toolbar) -> None:
