@@ -13,12 +13,12 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import numpy as np
 import pandas as pd
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
-from matplotlib.figure import Figure
 from PySide6.QtCore import QCoreApplication, QEvent, QEventLoop, QTimer
 from PySide6.QtWidgets import QApplication
 
 from csv_analyzer.data import CancelledError, DataError, Dataset, describe_columns
-from csv_analyzer.plots import HistogramSpec, prepare_histogram as real_prepare_histogram
+from csv_analyzer.plots import HistogramSpec
+from csv_analyzer.plots import prepare_histogram as real_prepare_histogram
 from csv_analyzer.plots import prepare_scatter as real_prepare_scatter
 from csv_analyzer.plots import render_histogram as real_render_histogram
 from csv_analyzer.qt_app.coordinator import Lifecycle, QtCoordinator
