@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .histogram_view import HistogramView
 from .scatter_view import ScatterView
 from .table_view import TableView
 
@@ -75,6 +76,9 @@ class QtShell(QMainWindow):
 
         self.scatter_view = ScatterView(self.tabs)
         self.tabs.addTab(self.scatter_view, "Relationships")
+
+        self.histogram_view = HistogramView(self.tabs)
+        self.tabs.addTab(self.histogram_view, "Distributions")
 
         statistics = QWidget(self.tabs)
         statistics_layout = QVBoxLayout(statistics)

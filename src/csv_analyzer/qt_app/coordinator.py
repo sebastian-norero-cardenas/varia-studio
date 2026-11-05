@@ -20,6 +20,7 @@ from ..state import AppState, FilterRule, StateSnapshot
 from .diagnostics import best_effort_exception_log, best_effort_log
 from .errors import user_error_text
 from .filter_dialog import FilterDialog
+from .histogram_controller import HistogramController
 from .scatter_controller import ScatterController
 from .shell import QtShell
 from .table_controller import TableController
@@ -148,8 +149,20 @@ class QtCoordinator(QObject):
             gui_thread_id=self.gui_thread_id,
             parent=shell.scatter_view,
         )
+        self.histogram_controller = HistogramController(
+            shell.histogram_view,
+            snapshot_provider=self.snapshot,
+            submit_task=self.submit_task,
+            cancel_task=self.runner.cancel,
+            set_status=shell.set_status,
+            present_error=self._present_error,
+            gui_thread_id=self.gui_thread_id,
+            parent=shell.histogram_view,
+        )
         self.state.subscribe(self._on_state_changed)
-        self.scatter_controller.handle_state_change("dataset", self.state.snapshot())
+        snapshot = self.state.snapshot()
+        self.scatter_controller.handle_state_change("dataset", snapshot)
+        self.histogram_controller.handle_state_change("dataset", snapshot)
         self._sync_filter_view(self.state.snapshot())
 
     def start(self) -> None:
@@ -191,12 +204,24 @@ class QtCoordinator(QObject):
             self._present_error(error)
             return None
 
+        if exclusive_group == "plots":
+            self._supersede_plot_work(key)
         self._publications[key] = _Publication(
             token,
             _bind_callback(success, receiver),
             _bind_callback(failure, receiver),
         )
         return token
+
+    def _supersede_plot_work(self, keep_key: str) -> None:
+        """Cancel unpublished work from another Qt plot family without clearing its figure."""
+        for other_key, publication in tuple(self._publications.items()):
+            if (
+                other_key != keep_key
+                and publication.token.exclusive_group == "plots"
+            ):
+                self._publications.pop(other_key, None)
+                self.runner.cancel(other_key)
 
     @Slot()
     def open_file(self) -> None:
@@ -407,6 +432,7 @@ class QtCoordinator(QObject):
         self._filter_dialog = None
         self.table_controller.begin_close()
         self.scatter_controller.begin_close()
+        self.histogram_controller.begin_close()
         self._publications.clear()
         shell = self._shell()
         if shell is not None:
@@ -540,6 +566,7 @@ class QtCoordinator(QObject):
             self._cancel_filter_work()
         self.table_controller.handle_state_change(reason, snapshot)
         self.scatter_controller.handle_state_change(reason, snapshot)
+        self.histogram_controller.handle_state_change(reason, snapshot)
         shell = self._shell()
         dataset = self.state.dataset
         if shell is None:
