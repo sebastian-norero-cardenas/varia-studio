@@ -59,9 +59,7 @@ def export_with_confirmation(
         box.setWindowTitle("Replace file?")
         box.setText(f"The destination now exists:\n{destination}")
         box.setInformativeText("Replace it with this export?")
-        box.setStandardButtons(
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
+        box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         box.setDefaultButton(QMessageBox.StandardButton.No)
         try:
             answer = box.exec()
