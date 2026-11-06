@@ -17,8 +17,8 @@ from PySide6.QtWidgets import QApplication
 
 from csv_analyzer.analysis import (
     correlation_summary as real_correlation_summary,
-    numeric_summary as real_numeric_summary,
 )
+from csv_analyzer.analysis import numeric_summary as real_numeric_summary
 from csv_analyzer.data import CancelledError, DataError, Dataset, describe_columns
 from csv_analyzer.qt_app.coordinator import Lifecycle, QtCoordinator
 from csv_analyzer.qt_app.shell import QtShell
