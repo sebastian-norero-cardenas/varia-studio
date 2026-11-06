@@ -72,9 +72,7 @@ class StatisticsController(QObject):
         if selection_changed:
             self._invalidate_pending()
             self.current_result = None
-            self.view.clear_result(
-                "Selection changed. Compute again to use the current filters."
-            )
+            self.view.clear_result("Selection changed. Compute again to use the current filters.")
 
     @Slot()
     def settings_changed(self) -> None:
