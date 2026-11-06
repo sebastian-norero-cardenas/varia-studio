@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 import shiboken6
 from PySide6.QtCore import QEventLoop, QTimer
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QDialog
 
 from csv_analyzer.data import CancelledError, DataError, Dataset, describe_columns
 from csv_analyzer.plots import (
@@ -443,7 +443,8 @@ class ScatterAdvancedTests(unittest.TestCase):
         coordinator.begin_close()
         pump_until(lambda: coordinator.lifecycle is Lifecycle.CLOSED)
         self.assertIsNone(view._overlay_dialog)
-        self.assertTrue(shiboken6.isValid(dialog) or not dialog.isVisible())
+        if shiboken6.isValid(dialog):
+            self.assertFalse(dialog.isVisible())
 
     def test_plot_spec_colorbar_overlays_inset_and_transforms(self):
         coordinator, shell = self.make()
