@@ -33,6 +33,7 @@ class QtShell(QMainWindow):
         super().__init__()
         self._allow_close = False
         self._has_dataset = False
+        self._logical_activity = 0
         self._notices: tuple[str, ...] = ()
         self.setWindowTitle("Varia Studio")
         self.resize(1100, 700)
@@ -164,7 +165,7 @@ class QtShell(QMainWindow):
             else:
                 self.notices_label.setText("No import notices")
                 self.notices_button.setEnabled(False)
-        idle = not self.progress.isVisible()
+        idle = self._logical_activity == 0
         self.reload_button.setEnabled(self._has_dataset and idle)
         self.reload_action.setEnabled(self._has_dataset and idle)
 
@@ -172,6 +173,7 @@ class QtShell(QMainWindow):
         self.status_label.setText(text if len(text) <= 180 else text[:177] + "…")
 
     def set_activity(self, logical: int, physical: int) -> None:
+        self._logical_activity = logical
         busy = logical > 0 or physical > 0
         self.progress.setVisible(busy)
         self.cancel_button.setEnabled(logical > 0)
