@@ -112,3 +112,55 @@ cancellation/latest-request behavior and source DataFrame immutability for
 
 `F3A-SIGSEGV-CI = INDETERMINATE` remains unchanged. Any recurrence in F3.F CI
 must be reported rather than hidden by retries.
+
+## Final integration and QA status
+
+F3.F implementation candidate:
+
+- Candidate commit: `61557303f7a9650098922bb1087912d8a57e830e`.
+- Candidate tree: `b2c3cad4b855f708bcc37e413d82b8bbd129c87c`.
+- Baseline: `c1ca9f4cdcd92bbaf43f5f8d1ff37aa00de7d1c0`.
+- Integration: fast-forward only from the baseline to the candidate; no squash,
+  rebase, cherry-pick, merge commit or conflict resolution.
+- `QA06-F3F-01 = VERIFIED`.
+- `PHYSICAL_UI_X11 = PASS`.
+- F3.F blockers: none.
+- Final findings: HIGH none; MEDIUM none; LOW none.
+
+Final verification evidence:
+
+- F3.F Python 3.10: 8/8 PASS.
+- F3.F Python 3.12: 8/8 PASS.
+- S-200K-STATISTICS: 2/2 PASS.
+- Toolkit-neutral analysis: 26/26 PASS.
+- F3.E combined command: 20/20 PASS.
+- F3.D combined command: 20/20 PASS.
+- F3.C: 22/22 PASS.
+- F3.B: 42/42 PASS.
+- F3.A: 40/40 PASS.
+- historical/core: 56/56 PASS.
+- Ruff: PASS.
+
+The F3.D and F3.E 20/20 figures above are the combined-command counts from the
+F3.F workflow; they are not reinterpretations of those milestones' historical
+focal test counts.
+
+Final CI evidence:
+
+- Workflow: `F3.F Qt statistics`.
+- Run: `42238007888` (run number 5, attempt 1).
+- Result: SUCCESS.
+- Artifact: `f3-f-evidence`, artifact ID `13512578574`.
+- Artifact digest:
+  `sha256:e17dd6f98ebd7311a5adf69076f17bb3a77a1bf215dd8d3be2a36ba550a196ce`.
+
+The legacy Tk/CTk teardown message
+`invalid command name "...update" ("after" script)` is inherited,
+non-blocking noise and is not attributed to F3.F.
+
+`F3A-SIGSEGV-CI = INDETERMINATE` remains unchanged. It did not recur during
+F3.F verification and is not declared resolved.
+
+F3.F is integrated and independently verified, but formal milestone closure
+remains the responsibility of 01B.
+
