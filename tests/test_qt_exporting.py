@@ -23,6 +23,7 @@ from csv_analyzer.plots import export_figure
 from csv_analyzer.qt_app.coordinator import Lifecycle, QtCoordinator
 from csv_analyzer.qt_app.exporting import export_with_confirmation
 from csv_analyzer.qt_app.shell import QtShell
+from csv_analyzer.qt_app.statistics_view import StatisticsRequest
 from csv_analyzer.state import FilterRule
 
 APP = QApplication.instance() or QApplication(["varia-f3g-tests"])
@@ -315,10 +316,8 @@ class QtExportTests(unittest.TestCase):
         coordinator, shell = self.make()
         view = shell.statistics_view
         empty = pd.DataFrame(columns=["Column", "Rows", "Valid"])
-        request = view.build_request if False else None
-        self.assertIsNone(request)
-        view.result_model.replace_result(empty)
-        view.export_button.setEnabled(False)
+        request = StatisticsRequest("numeric", 1, ())
+        view.show_result(empty, request, 0)
         coordinator.statistics_controller.current_result = empty
         self.assertTrue(empty.empty)
         self.assertFalse(view.export_button.isEnabled())
