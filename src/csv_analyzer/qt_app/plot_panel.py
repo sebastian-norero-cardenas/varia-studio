@@ -5,7 +5,11 @@ from __future__ import annotations
 import shiboken6
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
 from matplotlib.figure import Figure
-from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
+from PySide6.QtCore import Signal
+from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+
+from ..plots import export_figure
+from .exporting import choose_save_path, close_export_dialogs, export_with_confirmation
 
 
 class FigureToolbar(NavigationToolbar2QT):
@@ -16,6 +20,9 @@ class FigureToolbar(NavigationToolbar2QT):
 
 class PlotPanel(QWidget):
     """Own exactly one visible Figure/canvas/toolbar tuple."""
+
+    export_succeeded = Signal(str)
+    export_failed = Signal(object)
 
     canvas_class = FigureCanvasQTAgg
     toolbar_class = FigureToolbar
@@ -29,6 +36,20 @@ class PlotPanel(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+
+        export_row = QHBoxLayout()
+        export_row.addStretch(1)
+        self.dpi = QComboBox(self)
+        for value in (150, 300, 600):
+            self.dpi.addItem(f"{value} DPI", value)
+        self.dpi.setCurrentIndex(1)
+        export_row.addWidget(self.dpi)
+        self.export_button = QPushButton("Export figure…", self)
+        self.export_button.setEnabled(False)
+        self.export_button.clicked.connect(self.export_current_figure)
+        export_row.addWidget(self.export_button)
+        layout.addLayout(export_row)
+
         self.host = QWidget(self)
         self.host_layout = QVBoxLayout(self.host)
         self.host_layout.setContentsMargins(0, 0, 0, 0)
@@ -87,12 +108,16 @@ class PlotPanel(QWidget):
         canvas.show()
         self.caption.setText(description)
         self.caption.setStyleSheet("")
+        self.export_button.setEnabled(True)
+        close_export_dialogs(self)
         self._dispose_tuple(*old)
 
     def clear(self, message: str | None = None) -> None:
         old = (self.figure, self.canvas, self.toolbar)
         self.figure = self.canvas = self.toolbar = None
+        close_export_dialogs(self)
         self._dispose_tuple(*old)
+        self.export_button.setEnabled(False)
         self.empty_label.setText(message or self.empty_text)
         self.empty_label.show()
         self.caption.setText("No figure yet")
@@ -101,6 +126,36 @@ class PlotPanel(QWidget):
     def error(self, message: str) -> None:
         self.caption.setText(f"Figure not updated: {message}")
         self.caption.setStyleSheet("color: #a33;")
+
+    def export_current_figure(self) -> None:
+        """Export the currently published Figure on the Qt GUI thread."""
+        figure = self.figure
+        if figure is None:
+            return
+        path = choose_save_path(
+            self,
+            title="Export displayed figure",
+            initial_name="figure.png",
+            name_filters=("PNG image (*.png)", "PDF (*.pdf)", "SVG (*.svg)"),
+            default_suffix="png",
+        )
+        if path is None or self.figure is not figure:
+            return
+
+        dpi = int(self.dpi.currentData())
+
+        def writer(overwrite: bool):
+            if self.figure is not figure:
+                return None
+            return export_figure(figure, path, dpi=dpi, overwrite=overwrite)
+
+        try:
+            published = export_with_confirmation(self, path, writer)
+        except Exception as error:
+            self.export_failed.emit(error)
+            return
+        if published is not None:
+            self.export_succeeded.emit(f"Figure exported to {published}")
 
     @classmethod
     def _dispose_candidate(
