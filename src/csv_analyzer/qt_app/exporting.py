@@ -16,6 +16,22 @@ _SAVE_DIALOG_NAME = "varia-export-save-dialog"
 _OVERWRITE_DIALOG_NAME = "varia-export-overwrite-dialog"
 
 
+def _suffix_for_name_filter(name_filter: str, default_suffix: str) -> str:
+    """Return one simple '*.ext' suffix, falling back to the caller default."""
+    start = name_filter.rfind("(*.")
+    if start >= 0 and name_filter.endswith(")"):
+        glob = name_filter[start + 1 : -1].strip()
+        if glob.startswith("*.") and " " not in glob:
+            candidate = glob[1:]
+            if candidate[1:].isalnum():
+                return candidate
+
+    fallback = default_suffix.strip()
+    if not fallback:
+        return ""
+    return fallback if fallback.startswith(".") else f".{fallback}"
+
+
 def choose_save_path(
     parent: QWidget,
     *,
@@ -31,14 +47,20 @@ def choose_save_path(
     dialog.setFileMode(QFileDialog.FileMode.AnyFile)
     dialog.setNameFilters(list(name_filters))
     dialog.selectFile(initial_name)
-    dialog.setDefaultSuffix(default_suffix)
+    dialog.setDefaultSuffix("")
     dialog.setOption(QFileDialog.Option.DontUseNativeDialog, True)
     dialog.setOption(QFileDialog.Option.DontConfirmOverwrite, True)
     try:
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return None
         files = dialog.selectedFiles()
-        return Path(files[0]).expanduser() if files else None
+        if not files:
+            return None
+        selected = Path(files[0]).expanduser()
+        if selected.suffix:
+            return selected
+        suffix = _suffix_for_name_filter(dialog.selectedNameFilter(), default_suffix)
+        return selected.with_name(f"{selected.name}{suffix}") if suffix else selected
     finally:
         dialog.deleteLater()
 
