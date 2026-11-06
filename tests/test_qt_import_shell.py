@@ -267,6 +267,28 @@ class QtImportShellTests(unittest.TestCase):
         self.assertEqual(coordinator.state.dataset.path.name, "open.csv")
         self.assertEqual(shell.tabs.currentWidget(), shell.data_tab)
 
+    def test_open_success_activates_data_tab_from_statistics(self):
+        def loader(path, options, *, cancel=None):
+            return make_dataset(pd.DataFrame({"x": [1, 2]}), path)
+
+        coordinator, shell = self.make(loader=loader)
+        shell.tabs.setCurrentWidget(shell.statistics_view)
+        self.assertIs(shell.tabs.currentWidget(), shell.statistics_view)
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "open.csv"
+            path.write_text("x\n1\n", encoding="utf-8")
+            with patch.object(
+                QFileDialog,
+                "getOpenFileName",
+                return_value=(str(path), "Data files"),
+            ):
+                coordinator.open_file()
+            self.wait_idle(coordinator)
+
+        self.assertEqual(coordinator.state.dataset.path.name, "open.csv")
+        self.assertIs(shell.tabs.currentWidget(), shell.data_tab)
+
     def test_real_import_integration_formats_encodings_headers_decimal_and_dates(self):
         coordinator, shell = self.make()
         with tempfile.TemporaryDirectory() as directory:
