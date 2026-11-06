@@ -138,28 +138,71 @@ class QtExportTests(unittest.TestCase):
     def test_real_qfiledialog_suffix_follows_selected_filter(self):
         parent = QtShell()
         self.addCleanup(parent.deleteLater)
-        filters = (
+        figure_filters = (
             "PNG image (*.png)",
             "PDF (*.pdf)",
             "SVG (*.svg)",
         )
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            for name_filter, suffix in (
-                ("PNG image (*.png)", ".png"),
-                ("PDF (*.pdf)", ".pdf"),
-                ("SVG (*.svg)", ".svg"),
+            for name_filter, filename, expected in (
+                ("PNG image (*.png)", "figure", "figure.png"),
+                ("PDF (*.pdf)", "figure", "figure.pdf"),
+                ("SVG (*.svg)", "figure", "figure.svg"),
+                ("PNG image (*.png)", "figure.png", "figure.png"),
+                ("PDF (*.pdf)", "figure.pdf", "figure.pdf"),
+                ("SVG (*.svg)", "figure.svg", "figure.svg"),
+                ("PDF (*.pdf)", "figure.svg", "figure.svg"),
+                ("PNG image (*.png)", "figure.txt", "figure.txt"),
             ):
-                with self.subTest(name_filter=name_filter):
+                with self.subTest(name_filter=name_filter, filename=filename):
                     chosen = self._choose_with_real_dialog(
                         parent,
                         root,
                         name_filter=name_filter,
-                        filename="figure",
-                        name_filters=filters,
+                        filename=filename,
+                        name_filters=figure_filters,
                         default_suffix="png",
                     )
-                    self.assertEqual(chosen, root / f"figure{suffix}")
+                    self.assertEqual(chosen, root / expected)
+
+            for filename, expected in (
+                ("statistics", "statistics.csv"),
+                ("statistics.csv", "statistics.csv"),
+            ):
+                with self.subTest(name_filter="CSV (*.csv)", filename=filename):
+                    chosen = self._choose_with_real_dialog(
+                        parent,
+                        root,
+                        name_filter="CSV (*.csv)",
+                        filename=filename,
+                        name_filters=("CSV (*.csv)",),
+                        default_suffix="csv",
+                    )
+                    self.assertEqual(chosen, root / expected)
+
+    def test_real_qfiledialog_cancel_returns_none(self):
+        parent = QtShell()
+        self.addCleanup(parent.deleteLater)
+
+        def cancel_dialog():
+            dialogs = [
+                dialog
+                for dialog in parent.findChildren(QFileDialog)
+                if dialog.objectName() == "varia-export-save-dialog"
+            ]
+            self.assertEqual(len(dialogs), 1)
+            dialogs[0].reject()
+
+        QTimer.singleShot(0, cancel_dialog)
+        chosen = choose_save_path(
+            parent,
+            title="Export cancel test",
+            initial_name="figure",
+            name_filters=("PNG image (*.png)", "PDF (*.pdf)", "SVG (*.svg)"),
+            default_suffix="png",
+        )
+        self.assertIsNone(chosen)
 
     def test_figure_button_state_and_current_figure_replacement(self):
         _coordinator, shell = self.make()
@@ -564,6 +607,59 @@ class QtExportTests(unittest.TestCase):
 
         self.assertIsNone(panel.figure)
         self.assertFalse(panel.export_button.isEnabled())
+
+    def test_stale_figure_dialog_guard_prevents_export(self):
+        _coordinator, shell = self.make()
+        panel = shell.scatter_view.panel
+        panel.show_figure(simple_figure("stale"), "stale")
+
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "stale.png"
+
+            def invalidate(*_args, **_kwargs):
+                panel.clear()
+                return target
+
+            with (
+                patch(
+                    "csv_analyzer.qt_app.plot_panel.choose_save_path",
+                    side_effect=invalidate,
+                ),
+                patch("csv_analyzer.qt_app.plot_panel.export_figure") as writer,
+            ):
+                panel.export_current_figure()
+
+            writer.assert_not_called()
+            self.assertFalse(target.exists())
+            self.assertFalse(panel.export_button.isEnabled())
+
+    def test_stale_statistics_dialog_guard_prevents_export(self):
+        coordinator, shell = self.make()
+        self.commit(coordinator, pd.DataFrame({"x": [1.0, 2.0], "y": [2.0, 4.0]}))
+        self.compute_statistics(coordinator)
+        view = shell.statistics_view
+
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "stale.csv"
+
+            def invalidate(*_args, **_kwargs):
+                view.ddof.setCurrentIndex(1)
+                return target
+
+            with (
+                patch(
+                    "csv_analyzer.qt_app.statistics_controller.choose_save_path",
+                    side_effect=invalidate,
+                ),
+                patch(
+                    "csv_analyzer.qt_app.statistics_controller.export_statistics"
+                ) as writer,
+            ):
+                coordinator.statistics_controller.request_export()
+
+            writer.assert_not_called()
+            self.assertFalse(target.exists())
+            self.assertFalse(view.export_button.isEnabled())
 
     def test_figure_export_runs_on_gui_thread(self):
         _coordinator, shell = self.make()
