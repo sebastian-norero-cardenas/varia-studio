@@ -103,3 +103,88 @@ graphics formats, widget screenshots, plot-data export or F3.H functionality.
 
 `F3A-SIGSEGV-CI = INDETERMINATE` remains unchanged. Any recurrence in F3.G CI
 must be reported rather than hidden by retries.
+
+
+## Final QA and integration record
+
+Initial F3.G candidate:
+
+```text
+6b2d30cf0b37b67474e314575593b829c2e107f1
+```
+
+The initial independent QA result was:
+
+```text
+QA06-F3G-01 = NOT VERIFIED
+F3G-QA-01 = MEDIUM / OPEN
+```
+
+The confirmed defect was that a real Qt save dialog with the PDF or SVG filter
+selected and a filename without an extension produced a `.png` suffix.
+
+F3.G-R1 corrected only the implicit-suffix decision in the Qt helper. The final
+contract is:
+
+```text
+PNG + figure       -> figure.png
+PDF + figure       -> figure.pdf
+SVG + figure       -> figure.svg
+CSV + statistics   -> statistics.csv
+```
+
+Explicit filename extensions are preserved. The Qt helper only maps the
+effectively selected filter to an implicit suffix; format validation, overwrite
+authority and atomic publication remain with `export_figure()`,
+`export_statistics()` and `atomic_destination()`.
+
+Final R1 candidate:
+
+```text
+6527b3b4577a05a80bf90eb12e0e0d1d837c5b9d
+tree 02c3ec51be93db56072661ed878bac1583cd1ff9
+```
+
+Final QA state:
+
+```text
+QA06-F3G-01-R1 = VERIFIED
+F3G-QA-01 = CLOSED
+PHYSICAL_SUFFIX_R1 = PASS
+```
+
+Final R1 evidence:
+
+```text
+F3.G Python 3.10  18/18 PASS
+F3.G Python 3.12  18/18 PASS
+core exports       11/11 PASS
+Ruff                       PASS
+
+Workflow: F3.G Qt export
+Run: 42256128941
+Run number: 11
+Attempt: 1
+Result: SUCCESS
+Artifact: f3-g-evidence
+Artifact ID: 13522657832
+Digest: sha256:1341c06da033cae4fcd5ecda159e38dc1328024baff556c262a47b0743ccb7d7
+```
+
+The R1 campaign also recorded:
+
+```text
+SOURCE_REPO_UNTOUCHED = PASS
+```
+
+Harness-only observations such as the overly strict SVG basename sentinel and
+the earlier `qa06_f3g.csv` fixture issue are not product defects and were not
+changed in production.
+
+F3.G-R1 was integrated into `main` by fast-forward from production
+`ee20be33ee7339cc0241945060b04b81dfd16c54` to the final R1 candidate
+`6527b3b4577a05a80bf90eb12e0e0d1d837c5b9d`, preserving the candidate tree
+unchanged.
+
+`F3A-SIGSEGV-CI = INDETERMINATE` remains unchanged. It did not reappear during
+F3.G-R1 and is not considered resolved.
