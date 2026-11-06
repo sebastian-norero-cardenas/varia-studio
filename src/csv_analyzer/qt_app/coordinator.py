@@ -170,6 +170,9 @@ class QtCoordinator(QObject):
             gui_thread_id=self.gui_thread_id,
             parent=shell.statistics_view,
         )
+        for panel in (shell.scatter_view.panel, shell.histogram_view.panel):
+            panel.export_succeeded.connect(shell.set_status)
+            panel.export_failed.connect(self._present_error)
         self.state.subscribe(self._on_state_changed)
         snapshot = self.state.snapshot()
         self.scatter_controller.handle_state_change("dataset", snapshot)
