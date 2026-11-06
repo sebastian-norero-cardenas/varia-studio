@@ -651,9 +651,7 @@ class QtExportTests(unittest.TestCase):
                     "csv_analyzer.qt_app.statistics_controller.choose_save_path",
                     side_effect=invalidate,
                 ),
-                patch(
-                    "csv_analyzer.qt_app.statistics_controller.export_statistics"
-                ) as writer,
+                patch("csv_analyzer.qt_app.statistics_controller.export_statistics") as writer,
             ):
                 coordinator.statistics_controller.request_export()
 
