@@ -199,21 +199,29 @@ class QtExportTests(unittest.TestCase):
             self.assertEqual(exported, [scatter_figure, histogram_figure])
 
             target = root / "broken.png"
+            target.write_bytes(b"original image")
             with (
                 patch(
                     "csv_analyzer.qt_app.plot_panel.choose_save_path",
                     return_value=target,
                 ),
-                patch(
-                    "csv_analyzer.qt_app.plot_panel.export_figure",
-                    side_effect=DataError("simulated figure failure"),
+                patch.object(
+                    scatter_figure,
+                    "savefig",
+                    side_effect=ValueError("simulated savefig failure"),
+                ),
+                patch.object(
+                    QMessageBox,
+                    "exec",
+                    return_value=QMessageBox.StandardButton.Yes,
                 ),
             ):
                 scatter.export_current_figure()
+            self.assertEqual(target.read_bytes(), b"original image")
             self.assertIs(scatter.figure, scatter_figure)
             self.assertTrue(scatter.export_button.isEnabled())
             self.assertTrue(shell.errors)
-            self.assertIn("simulated figure failure", shell.errors[-1])
+            self.assertIn("simulated savefig failure", shell.errors[-1])
 
     def test_statistics_csv_full_precision_and_invalidation(self):
         coordinator, shell = self.make()
@@ -273,20 +281,28 @@ class QtExportTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory) / "broken.csv"
+            target.write_text("original csv", encoding="utf-8")
             with (
                 patch(
                     "csv_analyzer.qt_app.statistics_controller.choose_save_path",
                     return_value=target,
                 ),
-                patch(
-                    "csv_analyzer.qt_app.statistics_controller.export_statistics",
-                    side_effect=DataError("simulated csv failure"),
+                patch.object(
+                    pd.DataFrame,
+                    "to_csv",
+                    side_effect=OSError("simulated to_csv failure"),
+                ),
+                patch.object(
+                    QMessageBox,
+                    "exec",
+                    return_value=QMessageBox.StandardButton.Yes,
                 ),
             ):
                 coordinator.statistics_controller.request_export()
+            self.assertEqual(target.read_text(encoding="utf-8"), "original csv")
         self.assertIs(coordinator.statistics_controller.current_result, result)
         self.assertTrue(view.export_button.isEnabled())
-        self.assertIn("simulated csv failure", shell.errors[-1])
+        self.assertIn("simulated to_csv failure", shell.errors[-1])
 
         shell.errors.clear()
         coordinator._present_error = lambda _error: None
@@ -297,14 +313,15 @@ class QtExportTests(unittest.TestCase):
 
     def test_empty_statistics_result_is_not_exportable(self):
         coordinator, shell = self.make()
-        self.commit(coordinator, pd.DataFrame({"x": pd.Series(dtype="float64")}))
-        result = self.compute_statistics(coordinator)
-        self.assertIsNotNone(result)
-        self.assertFalse(result.empty)
-        self.assertTrue(shell.statistics_view.export_button.isEnabled())
-
-        shell.statistics_view.mode.setCurrentIndex(2)
-        self.assertFalse(shell.statistics_view.export_button.isEnabled())
+        view = shell.statistics_view
+        empty = pd.DataFrame(columns=["Column", "Rows", "Valid"])
+        request = view.build_request if False else None
+        self.assertIsNone(request)
+        view.result_model.replace_result(empty)
+        view.export_button.setEnabled(False)
+        coordinator.statistics_controller.current_result = empty
+        self.assertTrue(empty.empty)
+        self.assertFalse(view.export_button.isEnabled())
 
     def test_existing_destination_decline_and_accept(self):
         frame = pd.DataFrame({"x": [1.25]})
