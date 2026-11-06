@@ -487,6 +487,26 @@ class QtExportTests(unittest.TestCase):
         self.assertIsNone(panel.figure)
         self.assertFalse(panel.export_button.isEnabled())
 
+    def test_close_with_overwrite_confirmation_open_rejects_dialog(self):
+        coordinator, shell = self.make()
+        panel = shell.scatter_view.panel
+        panel.show_figure(simple_figure("close-confirmation"), "close-confirmation")
+
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "existing.png"
+            target.write_bytes(b"existing")
+            with patch(
+                "csv_analyzer.qt_app.plot_panel.choose_save_path",
+                return_value=target,
+            ):
+                QTimer.singleShot(0, coordinator.begin_close)
+                panel.export_current_figure()
+            pump_until(lambda: coordinator.lifecycle is Lifecycle.CLOSED)
+            self.assertEqual(target.read_bytes(), b"existing")
+
+        self.assertIsNone(panel.figure)
+        self.assertFalse(panel.export_button.isEnabled())
+
     def test_figure_export_runs_on_gui_thread(self):
         _coordinator, shell = self.make()
         panel = shell.scatter_view.panel
