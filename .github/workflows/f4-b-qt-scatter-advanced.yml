@@ -247,7 +247,7 @@ jobs:
 
           figure = view.panel.figure
           assert figure is not None
-          assert figure.axes[0].get_title() == "Advanced smoke"
+          assert figure.axes[0].get_title(loc="left") == "Advanced smoke"
           assert figure.axes[0].get_xlabel() == "X custom"
           assert any(text.get_text() == "note" for text in figure.axes[0].texts)
 
