@@ -19,7 +19,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..data import DataError
 from ..plots import Overlay, validate_overlay
 from .scatter_style_dialog import _finite_float
 
