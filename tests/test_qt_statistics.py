@@ -334,6 +334,12 @@ class StatisticsQtTests(unittest.TestCase):
         coordinator, shell = self.make()
         view = shell.statistics_view
         self.assertFalse(view.compute_button.isEnabled())
+        self.commit(coordinator, pd.DataFrame({"x": pd.Series(dtype="float64")}))
+        self.assertTrue(view.compute_button.isEnabled())
+        empty = self.compute(coordinator).set_index("Column").loc["x"]
+        self.assertEqual((empty["Rows"], empty["Valid"]), (0, 0))
+        self.assertTrue(np.isnan(empty["Mean"]))
+
         self.commit(coordinator, pd.DataFrame({"text": ["a", "b"]}))
         self.assertFalse(view.compute_button.isEnabled())
         view.mode.setCurrentIndex(1)
@@ -353,6 +359,17 @@ class StatisticsQtTests(unittest.TestCase):
         self.assertIsNone(controller.current_result)
 
         view.set_correlation_columns(("x", "y"))
+        errors.clear()
+        with patch(
+            "csv_analyzer.qt_app.statistics_controller.correlation_summary",
+            side_effect=RuntimeError("injected worker failure"),
+        ):
+            controller.request_compute()
+            pump_until(lambda: coordinator.runner.activity.physical == 0)
+        self.assertIsNone(controller.current_result)
+        self.assertTrue(errors)
+        self.assertIn("injected worker failure", str(errors[-1]))
+
         view.mode.setCurrentIndex(0)
         with patch.object(view, "show_result", side_effect=RuntimeError("install failure")):
             controller.request_compute()
