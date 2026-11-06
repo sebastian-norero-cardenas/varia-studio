@@ -1,0 +1,277 @@
+name: F3.F Qt statistics
+
+on:
+  push:
+    branches:
+      - feat/f3-f-qt-statistics
+
+permissions:
+  contents: read
+
+jobs:
+  focal-python:
+    name: F3.F focal / Python ${{ matrix.python-version }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12"]
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONFAULTHANDLER: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Ubuntu Qt runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libegl1 libgl1 libopengl0 libfontconfig1 \
+            libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 \
+            libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 \
+            libxcb-util1 libxcb-xinerama0 libxcb-xkb1
+
+      - name: Install focal environment
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python -m pip install --upgrade pip
+          if [ "${{ matrix.python-version }}" = "3.12" ]; then
+            python -m pip install -c constraints-python312.txt -e '.[dev,qt]'
+          else
+            python -m pip install -e '.[dev,qt]'
+          fi
+
+      - name: F3.F focal
+        run: python -m unittest -v tests.test_qt_statistics
+
+  verify:
+    name: F3.F regression / structural / build / smokes
+    needs: focal-python
+    runs-on: ubuntu-22.04
+    timeout-minutes: 70
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONFAULTHANDLER: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify baseline ancestry
+        run: |
+          set -euxo pipefail
+          test "$(git merge-base HEAD c1ca9f4cdcd92bbaf43f5f8d1ff37aa00de7d1c0)" = \
+            "c1ca9f4cdcd92bbaf43f5f8d1ff37aa00de7d1c0"
+          test -z "$(git status --porcelain)"
+          git rev-parse HEAD
+          git rev-parse HEAD^{tree}
+
+      - name: Install Ubuntu GUI runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            xvfb python3-tk libegl1 libgl1 libopengl0 libfontconfig1 \
+            libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 \
+            libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 \
+            libxcb-util1 libxcb-xinerama0 libxcb-xkb1
+
+      - name: Install development environment
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -c constraints-python312.txt -e '.[dev,qt]'
+
+      - name: F3.F focal
+        run: python -m unittest -v tests.test_qt_statistics | tee /tmp/f3f-tests.txt
+
+      - name: S-200K-STATISTICS structural
+        run: python -m unittest -v tests.test_statistics_structural | tee /tmp/f3f-structural.txt
+
+      - name: Toolkit-neutral analysis regression
+        run: python -m unittest -v tests.test_analysis_plots
+
+      - name: F3.E regression
+        run: python -m unittest -v tests.test_qt_histogram tests.test_histogram_structural
+
+      - name: F3.D regression
+        run: python -m unittest -v tests.test_qt_scatter tests.test_scatter_structural
+
+      - name: F3.C regression
+        run: python -m unittest -v tests.test_filters tests.test_qt_filters tests.test_filter_structural
+
+      - name: F3.B regression
+        run: python -m unittest -v tests.test_table tests.test_qt_table tests.test_table_structural
+
+      - name: F3.A regression
+        run: python -m unittest -v tests.test_qt_foundation
+
+      - name: Historical/core regression under Xvfb
+        env:
+          QT_QPA_PLATFORM: xcb
+        run: |
+          xvfb-run -a python -m unittest -v \
+            tests.test_application \
+            tests.test_data_state \
+            tests.test_export_callbacks \
+            tests.test_exports \
+            tests.test_gui \
+            tests.test_identity \
+            tests.test_jobs
+
+      - name: Ruff focal
+        run: |
+          python -m ruff check \
+            src/csv_analyzer/qt_app/coordinator.py \
+            src/csv_analyzer/qt_app/shell.py \
+            src/csv_analyzer/qt_app/statistics_model.py \
+            src/csv_analyzer/qt_app/statistics_view.py \
+            src/csv_analyzer/qt_app/statistics_controller.py \
+            src/csv_analyzer/qt_app/statistics_columns_dialog.py \
+            tests/test_qt_statistics.py \
+            tests/test_statistics_structural.py
+          python -m ruff format --check \
+            src/csv_analyzer/qt_app/coordinator.py \
+            src/csv_analyzer/qt_app/shell.py \
+            src/csv_analyzer/qt_app/statistics_model.py \
+            src/csv_analyzer/qt_app/statistics_view.py \
+            src/csv_analyzer/qt_app/statistics_controller.py \
+            src/csv_analyzer/qt_app/statistics_columns_dialog.py \
+            tests/test_qt_statistics.py \
+            tests/test_statistics_structural.py
+
+      - name: Build wheel and sdist
+        run: |
+          mkdir -p dist
+          python -m build
+          sha256sum dist/* | tee dist/SHA256SUMS
+
+      - name: Clean base install without Qt extra
+        shell: bash
+        run: |
+          set -euxo pipefail
+          WHEEL="$(readlink -f "$(ls dist/*.whl)")"
+          python -m venv /tmp/varia-f3f-base
+          /tmp/varia-f3f-base/bin/python -m pip install --upgrade pip
+          /tmp/varia-f3f-base/bin/pip install -c "$GITHUB_WORKSPACE/constraints-python312.txt" "$WHEEL"
+          /tmp/varia-f3f-base/bin/pip check
+          /tmp/varia-f3f-base/bin/python - <<'PY' | tee dist/base-environment.txt
+          import importlib.util
+          assert importlib.util.find_spec("PySide6") is None
+          import csv_analyzer.analysis
+          print("base_pyside6=ABSENT")
+          print("statistics_core_import=PASS")
+          PY
+
+      - name: CTk coexistence smoke
+        env:
+          QT_QPA_PLATFORM: xcb
+        run: |
+          mkdir -p /tmp/varia-f3f-runtime
+          cd /tmp/varia-f3f-runtime
+          env -u PYTHONPATH /tmp/varia-f3f-base/bin/varia-studio --help
+          env -u PYTHONPATH xvfb-run -a /tmp/varia-f3f-base/bin/python - <<'PY' \
+            | tee "$GITHUB_WORKSPACE/dist/ctk-smoke.txt"
+          from csv_analyzer.app import Application
+          app = Application()
+          app.update_idletasks()
+          print("ctk_coexistence=PASS")
+          app.close()
+          PY
+
+      - name: Clean Qt install from same wheel
+        shell: bash
+        run: |
+          set -euxo pipefail
+          WHEEL="$(readlink -f "$(ls dist/*.whl)")"
+          python -m venv /tmp/varia-f3f-qt
+          /tmp/varia-f3f-qt/bin/python -m pip install --upgrade pip
+          /tmp/varia-f3f-qt/bin/pip install \
+            -c "$GITHUB_WORKSPACE/constraints-python312.txt" "${WHEEL}[qt]"
+          /tmp/varia-f3f-qt/bin/pip check
+
+      - name: Installed Statistics smoke
+        shell: bash
+        run: |
+          cd /tmp/varia-f3f-runtime
+          cat > statistics-smoke.csv <<'EOF'
+          x,y,group
+          1,2,a
+          2,4,a
+          3,6,b
+          4,8,b
+          EOF
+          env -u PYTHONPATH QT_QPA_PLATFORM=offscreen \
+            /tmp/varia-f3f-qt/bin/python - <<'PY' | tee "$GITHUB_WORKSPACE/dist/qt-statistics-smoke.txt"
+          from pathlib import Path
+          from PySide6.QtCore import QEventLoop, QTimer
+          from csv_analyzer.qt_app.bootstrap import create_application
+          from csv_analyzer.qt_app.coordinator import Lifecycle
+
+          def pump(predicate):
+              if predicate():
+                  return
+              loop = QEventLoop()
+              timer = QTimer()
+              timer.setInterval(2)
+              timer.timeout.connect(lambda: loop.quit() if predicate() else None)
+              timer.start()
+              QTimer.singleShot(5000, loop.quit)
+              loop.exec()
+              assert predicate()
+
+          app, coordinator, shell = create_application()
+          coordinator.start()
+          shell.show()
+          coordinator.load_path(Path("statistics-smoke.csv"))
+          pump(lambda: shell.statistics_view.compute_button.isEnabled())
+          shell.tabs.setCurrentWidget(shell.statistics_view)
+          coordinator.statistics_controller.request_compute()
+          pump(lambda: coordinator.runner.activity.physical == 0)
+          result = coordinator.statistics_controller.current_result
+          assert result is not None and len(result) == 2
+          assert set(result["ddof"]) == {1}
+          shell.statistics_view.mode.setCurrentIndex(1)
+          coordinator.statistics_controller.request_compute()
+          pump(lambda: coordinator.runner.activity.physical == 0)
+          assert "Most frequent" in coordinator.statistics_controller.current_result.columns
+          shell.statistics_view.mode.setCurrentIndex(2)
+          coordinator.statistics_controller.request_compute()
+          pump(lambda: coordinator.runner.activity.physical == 0)
+          assert coordinator.statistics_controller.current_result.iloc[0]["Paired N"] == 4
+          shell.close()
+          pump(lambda: coordinator.lifecycle is Lifecycle.CLOSED and not shell.isVisible())
+          print("qt_statistics_smoke=PASS")
+          print("qt_lifecycle=CLOSED")
+          PY
+
+      - name: Record evidence
+        run: |
+          cp /tmp/f3f-tests.txt dist/f3f-tests.txt
+          cp /tmp/f3f-structural.txt dist/f3f-structural.txt
+          {
+            echo "commit=$(git rev-parse HEAD)"
+            echo "tree=$(git rev-parse HEAD^{tree})"
+            echo "baseline=c1ca9f4cdcd92bbaf43f5f8d1ff37aa00de7d1c0"
+            echo "python=$(python --version 2>&1)"
+            echo "pyside6=$(python -c 'import PySide6; print(PySide6.__version__)')"
+            echo "pandas=$(python -c 'import pandas; print(pandas.__version__)')"
+          } | tee dist/f3f-environment.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: f3-f-evidence
+          path: dist/*
+          if-no-files-found: error
