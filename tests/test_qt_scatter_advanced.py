@@ -492,7 +492,7 @@ class ScatterAdvancedTests(unittest.TestCase):
         self.assertGreaterEqual(len(figure.axes), 2)
         main = figure.axes[0]
         self.assertEqual(len(main.child_axes), 1)
-        self.assertEqual(main.get_title(), "Advanced")
+        self.assertEqual(main.get_title(loc="left"), "Advanced")
         self.assertEqual(main.get_xlabel(), "|custom x|")
         self.assertEqual(main.get_ylabel(), "custom y")
         self.assertTrue(any(text.get_text() == "note" for text in main.texts))
@@ -532,7 +532,7 @@ class ScatterAdvancedTests(unittest.TestCase):
         self.assertIs(exported[0], figure_a)
         self.assertIs(exported[1], figure_b)
         self.assertIsNot(figure_a, figure_b)
-        self.assertEqual(figure_b.axes[0].get_title(), "B")
+        self.assertEqual(figure_b.axes[0].get_title(loc="left"), "B")
         self.assertEqual(len(figure_b.axes[0].child_axes), 1)
 
 
