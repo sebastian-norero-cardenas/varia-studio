@@ -85,9 +85,10 @@ class RecordingShell(QtShell):
 
 
 class QtImportShellTests(unittest.TestCase):
-    def make(self, *, loader=None):
+    def make(self, *, loader=None, **kwargs):
         shell = RecordingShell()
-        kwargs = {"loader": loader} if loader is not None else {}
+        if loader is not None:
+            kwargs["loader"] = loader
         coordinator = QtCoordinator(shell, **kwargs)
         coordinator.start()
         self.addCleanup(self.cleanup, coordinator, shell)
