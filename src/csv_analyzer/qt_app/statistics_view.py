@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..data import DataError, Dataset
+from .exporting import close_export_dialogs
 from .statistics_model import StatisticsResultModel
 
 
@@ -32,6 +33,7 @@ class StatisticsView(QWidget):
     compute_requested = Signal()
     settings_changed = Signal()
     choose_columns_requested = Signal()
+    export_requested = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -66,9 +68,17 @@ class StatisticsView(QWidget):
         columns_layout.addWidget(self.columns_label, 1)
         form.addRow("Correlation", columns_row)
 
-        self.compute_button = QPushButton("Compute", controls)
+        actions_row = QWidget(controls)
+        actions_layout = QHBoxLayout(actions_row)
+        actions_layout.setContentsMargins(0, 0, 0, 0)
+        self.compute_button = QPushButton("Compute", actions_row)
         self.compute_button.clicked.connect(self.compute_requested)
-        form.addRow("", self.compute_button)
+        actions_layout.addWidget(self.compute_button)
+        self.export_button = QPushButton("Export CSV…", actions_row)
+        self.export_button.setEnabled(False)
+        self.export_button.clicked.connect(self.export_requested)
+        actions_layout.addWidget(self.export_button)
+        form.addRow("", actions_row)
         layout.addWidget(controls)
 
         self.local_status = QLabel("Open a dataset to compute statistics.", self)
@@ -144,7 +154,9 @@ class StatisticsView(QWidget):
         return StatisticsRequest(mode, ddof, self._correlation_columns)
 
     def clear_result(self, message: str) -> None:
+        close_export_dialogs(self)
         self.result_model.replace_result(None)
+        self.export_button.setEnabled(False)
         self.local_status.setText(message)
 
     def show_result(self, result, request: StatisticsRequest, selected_count: int) -> None:
@@ -158,13 +170,18 @@ class StatisticsView(QWidget):
                 f"{len(result):,} result rows"
             )
             self.table.resizeColumnsToContents()
+            self.export_button.setEnabled(True)
         else:
+            self.export_button.setEnabled(False)
             self.local_status.setText(
                 f"No {request.mode} result rows for the current dataset and selection."
             )
 
     def set_feedback(self, text: str) -> None:
         self.local_status.setText(text)
+
+    def close_export_dialogs(self) -> None:
+        close_export_dialogs(self)
 
     def _settings_changed(self, _index=None) -> None:
         self._sync_mode_controls()
