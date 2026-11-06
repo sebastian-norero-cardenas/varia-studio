@@ -15,13 +15,13 @@ import numpy as np
 import pandas as pd
 from matplotlib.figure import Figure
 from PySide6.QtCore import QEventLoop, QTimer
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
 from csv_analyzer.data import DataError, Dataset, describe_columns
 from csv_analyzer.exports import export_statistics
 from csv_analyzer.plots import export_figure
 from csv_analyzer.qt_app.coordinator import Lifecycle, QtCoordinator
-from csv_analyzer.qt_app.exporting import export_with_confirmation
+from csv_analyzer.qt_app.exporting import choose_save_path, export_with_confirmation
 from csv_analyzer.qt_app.shell import QtShell
 from csv_analyzer.qt_app.statistics_view import StatisticsRequest
 from csv_analyzer.state import FilterRule
@@ -102,6 +102,64 @@ class QtExportTests(unittest.TestCase):
         pump_until(lambda: coordinator.runner.activity.physical == 0)
         APP.processEvents()
         return coordinator.statistics_controller.current_result
+
+    def _choose_with_real_dialog(
+        self,
+        parent,
+        directory: Path,
+        *,
+        name_filter: str,
+        filename: str,
+        name_filters: tuple[str, ...],
+        default_suffix: str,
+    ) -> Path | None:
+        def drive_dialog():
+            dialogs = [
+                dialog
+                for dialog in parent.findChildren(QFileDialog)
+                if dialog.objectName() == "varia-export-save-dialog"
+            ]
+            self.assertEqual(len(dialogs), 1)
+            dialog = dialogs[0]
+            dialog.setDirectory(str(directory))
+            dialog.selectNameFilter(name_filter)
+            dialog.selectFile(filename)
+            dialog.accept()
+
+        QTimer.singleShot(0, drive_dialog)
+        return choose_save_path(
+            parent,
+            title="Export test",
+            initial_name=filename,
+            name_filters=name_filters,
+            default_suffix=default_suffix,
+        )
+
+    def test_real_qfiledialog_suffix_follows_selected_filter(self):
+        parent = QtShell()
+        self.addCleanup(parent.deleteLater)
+        filters = (
+            "PNG image (*.png)",
+            "PDF (*.pdf)",
+            "SVG (*.svg)",
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name_filter, suffix in (
+                ("PNG image (*.png)", ".png"),
+                ("PDF (*.pdf)", ".pdf"),
+                ("SVG (*.svg)", ".svg"),
+            ):
+                with self.subTest(name_filter=name_filter):
+                    chosen = self._choose_with_real_dialog(
+                        parent,
+                        root,
+                        name_filter=name_filter,
+                        filename="figure",
+                        name_filters=filters,
+                        default_suffix="png",
+                    )
+                    self.assertEqual(chosen, root / f"figure{suffix}")
 
     def test_figure_button_state_and_current_figure_replacement(self):
         _coordinator, shell = self.make()
