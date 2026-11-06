@@ -21,6 +21,7 @@ from .diagnostics import best_effort_exception_log, best_effort_log
 from .errors import user_error_text
 from .filter_dialog import FilterDialog
 from .histogram_controller import HistogramController
+from .import_dialog import ImportOptionsDialog
 from .scatter_controller import ScatterController
 from .shell import QtShell
 from .statistics_controller import StatisticsController
@@ -119,6 +120,7 @@ class QtCoordinator(QObject):
         self._loader = loader
         self._publications: dict[str, _Publication] = {}
         self._filter_dialog: FilterDialog | None = None
+        self._import_dialog: ImportOptionsDialog | None = None
 
         self.runner = QtTaskRunner(
             self,
@@ -130,6 +132,8 @@ class QtCoordinator(QObject):
         self.runner.physical_idle.connect(self._on_physical_idle)
 
         shell.open_requested.connect(self.open_file)
+        shell.reload_requested.connect(self.reload_file)
+        shell.import_options_requested.connect(self.open_import_options)
         shell.cancel_requested.connect(self.cancel_all)
         shell.close_requested.connect(self.begin_close)
         shell.table_view.filters_requested.connect(self.open_filter_editor)
@@ -250,6 +254,47 @@ class QtCoordinator(QObject):
         )
         if path:
             self.load_path(path)
+
+    @Slot()
+    def reload_file(self) -> TaskToken | None:
+        if self.lifecycle is not Lifecycle.RUNNING:
+            return None
+        dataset = self.state.dataset
+        if dataset is None:
+            return None
+        return self.load_path(dataset.path)
+
+    @Slot()
+    def open_import_options(self) -> ImportOptionsDialog | None:
+        if self.lifecycle is not Lifecycle.RUNNING:
+            return None
+        if self._import_dialog is not None and shiboken6.isValid(self._import_dialog):
+            self._import_dialog.raise_()
+            self._import_dialog.activateWindow()
+            return self._import_dialog
+
+        shell = self._shell()
+        if shell is None:
+            return None
+        dialog = ImportOptionsDialog(self.import_options, parent=shell)
+        dialog.options_saved.connect(self._save_import_options)
+        dialog.finished.connect(self._on_import_dialog_finished)
+        self._import_dialog = dialog
+        dialog.open()
+        return dialog
+
+    @Slot(object)
+    def _save_import_options(self, options: object) -> None:
+        if self.lifecycle is not Lifecycle.RUNNING or not isinstance(options, ImportOptions):
+            return
+        self.import_options = options
+        shell = self._shell()
+        if shell is not None:
+            shell.set_status("Import options saved. Open or reload a file to apply them.")
+
+    @Slot(int)
+    def _on_import_dialog_finished(self, _result: int) -> None:
+        self._import_dialog = None
 
     def load_path(self, path: str | Path) -> TaskToken | None:
         if self.lifecycle is not Lifecycle.RUNNING:
@@ -442,6 +487,9 @@ class QtCoordinator(QObject):
         if self._filter_dialog is not None and shiboken6.isValid(self._filter_dialog):
             self._filter_dialog.reject()
         self._filter_dialog = None
+        if self._import_dialog is not None and shiboken6.isValid(self._import_dialog):
+            self._import_dialog.reject()
+        self._import_dialog = None
         self.table_controller.begin_close()
         self.scatter_controller.begin_close()
         self.histogram_controller.begin_close()
@@ -588,7 +636,15 @@ class QtCoordinator(QObject):
         if dataset is None:
             shell.set_dataset(None)
         else:
-            shell.set_dataset(dataset.path.name, len(dataset.frame), len(dataset.columns))
+            shell.set_dataset(
+                dataset.path.name,
+                len(dataset.frame),
+                len(dataset.columns),
+                missing=dataset.missing_count,
+                infinite=dataset.infinite_count,
+                selected=snapshot.selected_count,
+                notices=dataset.notices,
+            )
         self._sync_filter_view(snapshot)
 
     def _sync_filter_view(self, snapshot: StateSnapshot) -> None:
