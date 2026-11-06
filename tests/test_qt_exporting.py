@@ -190,7 +190,7 @@ class QtExportTests(unittest.TestCase):
             with (
                 patch(
                     "csv_analyzer.qt_app.plot_panel.choose_save_path",
-                    side_effect=lambda **_kwargs: next(paths),
+                    side_effect=lambda *_args, **_kwargs: next(paths),
                 ),
                 patch("csv_analyzer.qt_app.plot_panel.export_figure", side_effect=record),
             ):
