@@ -32,6 +32,7 @@ def choose_save_path(
     dialog.setNameFilters(list(name_filters))
     dialog.selectFile(initial_name)
     dialog.setDefaultSuffix(default_suffix)
+    dialog.setOption(QFileDialog.Option.DontUseNativeDialog, True)
     dialog.setOption(QFileDialog.Option.DontConfirmOverwrite, True)
     try:
         if dialog.exec() != QDialog.DialogCode.Accepted:
