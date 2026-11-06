@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 
 from .histogram_view import HistogramView
 from .scatter_view import ScatterView
+from .statistics_view import StatisticsView
 from .table_view import TableView
 
 
@@ -80,11 +81,8 @@ class QtShell(QMainWindow):
         self.histogram_view = HistogramView(self.tabs)
         self.tabs.addTab(self.histogram_view, "Distributions")
 
-        statistics = QWidget(self.tabs)
-        statistics_layout = QVBoxLayout(statistics)
-        statistics_layout.addWidget(QLabel("Statistics — not migrated yet"))
-        statistics_layout.addStretch(1)
-        self.tabs.addTab(statistics, "Statistics")
+        self.statistics_view = StatisticsView(self.tabs)
+        self.tabs.addTab(self.statistics_view, "Statistics")
 
         layout.addWidget(self.tabs, 1)
         self.setCentralWidget(root)
