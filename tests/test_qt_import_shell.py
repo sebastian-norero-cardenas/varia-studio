@@ -289,6 +289,168 @@ class QtImportShellTests(unittest.TestCase):
         self.assertEqual(coordinator.state.dataset.path.name, "open.csv")
         self.assertIs(shell.tabs.currentWidget(), shell.data_tab)
 
+    def test_ctrl_o_success_activates_data_tab_from_statistics(self):
+        def loader(path, options, *, cancel=None):
+            return make_dataset(pd.DataFrame({"x": [7]}), path)
+
+        coordinator, shell = self.make(loader=loader)
+        shell.tabs.setCurrentWidget(shell.statistics_view)
+
+        with patch.object(
+            QFileDialog,
+            "getOpenFileName",
+            return_value=("shortcut.csv", "Data files"),
+        ):
+            shell.open_action.trigger()
+            self.wait_idle(coordinator)
+
+        self.assertEqual(coordinator.state.dataset.path.name, "shortcut.csv")
+        self.assertIs(shell.tabs.currentWidget(), shell.data_tab)
+
+    def test_open_file_dialog_cancel_preserves_statistics_dataset_and_load_ticket(self):
+        coordinator, shell = self.make()
+        active = make_dataset(pd.DataFrame({"x": [1, 2]}), "active.csv")
+        self.commit(coordinator, active)
+        shell.tabs.setCurrentWidget(shell.statistics_view)
+        before = coordinator.state.snapshot()
+        ticket = coordinator.state.load_ticket
+
+        with patch.object(QFileDialog, "getOpenFileName", return_value=("", "")):
+            coordinator.open_file()
+
+        after = coordinator.state.snapshot()
+        self.assertIs(shell.tabs.currentWidget(), shell.statistics_view)
+        self.assertIs(after.dataset, before.dataset)
+        self.assertEqual(coordinator.state.load_ticket, ticket)
+        self.assertEqual(coordinator.runner.activity.physical, 0)
+        self.assertEqual(
+            (after.revision, after.dataset_revision, after.selection_revision),
+            (before.revision, before.dataset_revision, before.selection_revision),
+        )
+
+    def test_open_failure_preserves_statistics_dataset_revisions_and_derived_result(self):
+        def failing_loader(*_args, **_kwargs):
+            raise DataError("open failed")
+
+        coordinator, shell = self.make(loader=failing_loader)
+        active = make_dataset(
+            pd.DataFrame({"x": [1.0, 2.0], "y": [2.0, 4.0]}),
+            "active.csv",
+        )
+        self.commit(coordinator, active)
+        coordinator.statistics_controller.request_compute()
+        self.wait_idle(coordinator)
+        result = coordinator.statistics_controller.current_result
+        before = coordinator.state.snapshot()
+        shell.tabs.setCurrentWidget(shell.statistics_view)
+
+        with patch.object(
+            QFileDialog,
+            "getOpenFileName",
+            return_value=("broken.csv", "Data files"),
+        ):
+            coordinator.open_file()
+        self.wait_idle(coordinator)
+
+        after = coordinator.state.snapshot()
+        self.assertIs(shell.tabs.currentWidget(), shell.statistics_view)
+        self.assertIs(after.dataset, before.dataset)
+        self.assertIs(coordinator.statistics_controller.current_result, result)
+        self.assertEqual(
+            (after.revision, after.dataset_revision, after.selection_revision),
+            (before.revision, before.dataset_revision, before.selection_revision),
+        )
+        self.assertIn("still active", shell.status_label.text())
+
+    def test_open_cancelled_load_preserves_statistics_and_dataset(self):
+        entered = threading.Event()
+
+        def cancellable_loader(path, options, *, cancel=None):
+            entered.set()
+            while not cancel.wait(0.002):
+                pass
+            raise CancelledError()
+
+        coordinator, shell = self.make(loader=cancellable_loader)
+        active = make_dataset(pd.DataFrame({"x": [1, 2]}), "active.csv")
+        self.commit(coordinator, active)
+        before = coordinator.state.snapshot()
+        shell.tabs.setCurrentWidget(shell.statistics_view)
+
+        with patch.object(
+            QFileDialog,
+            "getOpenFileName",
+            return_value=("pending.csv", "Data files"),
+        ):
+            coordinator.open_file()
+        self.assertTrue(entered.wait(timeout=2))
+        coordinator.cancel_all()
+        self.wait_idle(coordinator)
+
+        after = coordinator.state.snapshot()
+        self.assertIs(shell.tabs.currentWidget(), shell.statistics_view)
+        self.assertIs(after.dataset, before.dataset)
+        self.assertEqual(
+            (after.revision, after.dataset_revision, after.selection_revision),
+            (before.revision, before.dataset_revision, before.selection_revision),
+        )
+
+    def test_superseded_open_cannot_activate_data_tab(self):
+        first_entered = threading.Event()
+        release_first = threading.Event()
+        open_candidate = make_dataset(pd.DataFrame({"x": [1]}), "open-a.csv")
+        winner = make_dataset(pd.DataFrame({"x": [9]}), "winner.csv")
+
+        def loader(path, options, *, cancel=None):
+            if Path(path).name == "open-a.csv":
+                first_entered.set()
+                release_first.wait(timeout=5)
+                return open_candidate
+            return winner
+
+        coordinator, shell = self.make(loader=loader, max_workers=2)
+        self.commit(coordinator, make_dataset(pd.DataFrame({"x": [0]}), "active.csv"))
+        shell.tabs.setCurrentWidget(shell.statistics_view)
+
+        with patch.object(
+            QFileDialog,
+            "getOpenFileName",
+            return_value=("open-a.csv", "Data files"),
+        ):
+            coordinator.open_file()
+        self.assertTrue(first_entered.wait(timeout=2))
+
+        coordinator.load_path("winner.csv")
+        release_first.set()
+        self.wait_idle(coordinator)
+
+        self.assertEqual(coordinator.state.dataset.path.name, "winner.csv")
+        self.assertEqual(coordinator.state.dataset.frame["x"].tolist(), [9])
+        self.assertIs(shell.tabs.currentWidget(), shell.statistics_view)
+
+    def test_reload_success_and_generic_load_preserve_statistics_tab(self):
+        values = {
+            "active.csv": make_dataset(pd.DataFrame({"x": [2]}), "active.csv"),
+            "generic.csv": make_dataset(pd.DataFrame({"x": [3]}), "generic.csv"),
+        }
+
+        def loader(path, options, *, cancel=None):
+            return values[Path(path).name]
+
+        coordinator, shell = self.make(loader=loader)
+        self.commit(coordinator, make_dataset(pd.DataFrame({"x": [1]}), "active.csv"))
+        shell.tabs.setCurrentWidget(shell.statistics_view)
+
+        coordinator.reload_file()
+        self.wait_idle(coordinator)
+        self.assertEqual(coordinator.state.dataset.frame["x"].tolist(), [2])
+        self.assertIs(shell.tabs.currentWidget(), shell.statistics_view)
+
+        coordinator.load_path("generic.csv")
+        self.wait_idle(coordinator)
+        self.assertEqual(coordinator.state.dataset.frame["x"].tolist(), [3])
+        self.assertIs(shell.tabs.currentWidget(), shell.statistics_view)
+
     def test_real_import_integration_formats_encodings_headers_decimal_and_dates(self):
         coordinator, shell = self.make()
         with tempfile.TemporaryDirectory() as directory:
