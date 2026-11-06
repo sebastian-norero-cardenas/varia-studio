@@ -45,7 +45,7 @@ class ScatterOverlayDialog(QDialog):
         self.resize(650, 720)
         self._items = list(overlays)
         self._edit_index: int | None = None
-        self._field_rows: dict[str, QWidget] = {}
+        self._field_rows: dict[str, tuple[QWidget | None, QWidget]] = {}
 
         layout = QVBoxLayout(self)
         note = QLabel(
@@ -96,8 +96,8 @@ class ScatterOverlayDialog(QDialog):
                 widget = QLineEdit(str(defaults[key]), row)
             row_layout.addWidget(widget)
             self.fields[key] = widget
-            self._field_rows[key] = row
             form.addRow(label, row)
+            self._field_rows[key] = (form.labelForField(row), row)
 
         layout.addWidget(form_host)
 
@@ -140,8 +140,11 @@ class ScatterOverlayDialog(QDialog):
 
     def _sync_fields(self) -> None:
         enabled = self.KINDS[self.kind.currentText()] | {"color", "opacity"}
-        for key, row in self._field_rows.items():
-            row.setVisible(key in enabled)
+        for key, (label, row) in self._field_rows.items():
+            visible = key in enabled
+            if label is not None:
+                label.setVisible(visible)
+            row.setVisible(visible)
 
     def build_item(self) -> Overlay:
         kind = self.kind.currentText()
