@@ -41,6 +41,8 @@ class ScatterController(QObject):
         self.current_spec: ScatterSpec | None = None
         self.current_counts: tuple[int, int, int, int, int, int] | None = None
         view.plot_requested.connect(self.request_plot)
+        view.reset_requested.connect(self.reset_settings)
+        view.settings_updated.connect(self._settings_updated)
 
     def handle_state_change(self, reason: str, snapshot: StateSnapshot) -> None:
         dataset_changed = snapshot.dataset_revision != self._dataset_revision
@@ -61,6 +63,24 @@ class ScatterController(QObject):
             self.current_counts = None
             self.view.panel.clear("Selection changed. Plot again to use the current filters.")
             self.view.set_feedback("Selection changed. Plot again to use the current filters.")
+
+    @Slot()
+    def reset_settings(self) -> None:
+        if self._closing:
+            return
+        self._invalidate_pending()
+        self.current_spec = None
+        self.current_counts = None
+        self.view.reset_settings()
+        self.view.panel.clear("Settings reset. Plot again.")
+        self.view.set_feedback("Settings reset. Plot again.")
+        self._set_status("Settings reset. Plot again.")
+
+    @Slot(str)
+    def _settings_updated(self, message: str) -> None:
+        if self._closing:
+            return
+        self._set_status(message)
 
     @Slot()
     def request_plot(self) -> None:
@@ -134,8 +154,11 @@ class ScatterController(QObject):
             return
         self._closing = True
         self._invalidate_pending()
+        self.view.close_advanced_dialogs()
         try:
             self.view.plot_requested.disconnect(self.request_plot)
+            self.view.reset_requested.disconnect(self.reset_settings)
+            self.view.settings_updated.disconnect(self._settings_updated)
         except (RuntimeError, TypeError):
             pass
         self.view.panel.clear()
