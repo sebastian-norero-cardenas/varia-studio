@@ -10,7 +10,9 @@ from PySide6.QtCore import QObject, Slot
 
 from ..analysis import categorical_summary, correlation_summary, numeric_summary
 from ..data import CancelledError
+from ..exports import export_statistics
 from ..state import StateSnapshot
+from .exporting import choose_save_path, export_with_confirmation
 from .statistics_columns_dialog import StatisticsColumnsDialog
 from .statistics_view import StatisticsRequest, StatisticsView
 
@@ -48,6 +50,7 @@ class StatisticsController(QObject):
         view.compute_requested.connect(self.request_compute)
         view.settings_changed.connect(self.settings_changed)
         view.choose_columns_requested.connect(self.open_columns_dialog)
+        view.export_requested.connect(self.request_export)
 
     def handle_state_change(self, reason: str, snapshot: StateSnapshot) -> None:
         dataset_changed = snapshot.dataset_revision != self._dataset_revision
@@ -135,6 +138,41 @@ class StatisticsController(QObject):
             self.view.set_feedback("Statistics computation could not be scheduled.")
 
     @Slot()
+    def request_export(self) -> None:
+        if self._closing:
+            return
+        result = self.current_result
+        if result is None or result.empty or not self.view.export_button.isEnabled():
+            return
+        path = choose_save_path(
+            self.view,
+            title="Export statistics",
+            initial_name="statistics.csv",
+            name_filters=("CSV (*.csv)",),
+            default_suffix="csv",
+        )
+        if (
+            path is None
+            or self._closing
+            or self.current_result is not result
+            or not self.view.export_button.isEnabled()
+        ):
+            return
+
+        def writer(overwrite: bool):
+            if self._closing or self.current_result is not result:
+                return None
+            return export_statistics(result, path, overwrite=overwrite)
+
+        try:
+            published = export_with_confirmation(self.view, path, writer)
+        except Exception as error:
+            self._present_error(error)
+            return
+        if published is not None:
+            self._set_status(f"Statistics exported to {published}")
+
+    @Slot()
     def open_columns_dialog(self) -> None:
         if self._closing:
             return
@@ -208,10 +246,12 @@ class StatisticsController(QObject):
         self._invalidate_pending()
         self._close_columns_dialog()
         self.current_result = None
+        self.view.close_export_dialogs()
         try:
             self.view.compute_requested.disconnect(self.request_compute)
             self.view.settings_changed.disconnect(self.settings_changed)
             self.view.choose_columns_requested.disconnect(self.open_columns_dialog)
+            self.view.export_requested.disconnect(self.request_export)
         except (RuntimeError, TypeError):
             pass
         self.view.result_model.replace_result(None)
