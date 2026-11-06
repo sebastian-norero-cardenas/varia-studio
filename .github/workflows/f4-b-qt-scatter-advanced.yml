@@ -1,0 +1,288 @@
+name: F4.B Qt scatter advanced
+
+on:
+  push:
+    branches:
+      - feat/f4-b-qt-scatter-advanced
+
+permissions:
+  contents: read
+
+jobs:
+  focal-python:
+    name: F4.B focal / Python ${{ matrix.python-version }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12"]
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONFAULTHANDLER: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Ubuntu Qt runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libegl1 libgl1 libopengl0 libfontconfig1 \
+            libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 \
+            libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 \
+            libxcb-util1 libxcb-xinerama0 libxcb-xkb1
+
+      - name: Install focal environment
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python -m pip install --upgrade pip
+          if [ "${{ matrix.python-version }}" = "3.12" ]; then
+            python -m pip install -c constraints-python312.txt -e '.[dev,qt]'
+          else
+            python -m pip install -e '.[dev,qt]'
+          fi
+
+      - name: F4.B focal
+        run: python -m unittest -v tests.test_qt_scatter_advanced
+
+  verify:
+    name: F4.B regressions / structural / build / installed smoke
+    needs: focal-python
+    runs-on: ubuntu-22.04
+    timeout-minutes: 75
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONFAULTHANDLER: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify baseline ancestry
+        run: |
+          set -euxo pipefail
+          test "$(git merge-base HEAD 989d7f70d09fec860f62ce037d53ab047eb550fa)" = \
+            "989d7f70d09fec860f62ce037d53ab047eb550fa"
+          test -z "$(git status --porcelain)"
+          git rev-parse HEAD
+          git rev-parse HEAD^{tree}
+
+      - name: Install Ubuntu GUI runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            xvfb python3-tk libegl1 libgl1 libopengl0 libfontconfig1 \
+            libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 \
+            libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 \
+            libxcb-util1 libxcb-xinerama0 libxcb-xkb1
+
+      - name: Install development environment
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -c constraints-python312.txt -e '.[dev,qt]'
+
+      - name: F4.B focal
+        run: python -m unittest -v tests.test_qt_scatter_advanced | tee /tmp/f4b-tests.txt
+
+      - name: S-200K-SCATTER structural
+        run: |
+          python -m unittest -v \
+            tests.test_qt_scatter_advanced.ScatterAdvancedStructuralTests \
+            | tee /tmp/f4b-structural.txt
+
+      - name: plots.py core regression
+        run: python -m unittest -v tests.test_analysis_plots
+
+      - name: F3.D Scatter regression
+        run: python -m unittest -v tests.test_qt_scatter tests.test_scatter_structural
+
+      - name: F3.G export smoke
+        run: |
+          python -m unittest -v \
+            tests.test_qt_exporting.QtExportTests.test_figure_button_state_and_current_figure_replacement \
+            tests.test_qt_exporting.QtExportTests.test_figure_png_pdf_svg_and_dpi_values \
+            tests.test_qt_exporting.QtExportTests.test_stale_figure_dialog_guard_prevents_export
+
+      - name: F4.A Open/Reload smoke
+        run: |
+          python -m unittest -v \
+            tests.test_qt_import_shell.QtImportShellTests.test_open_success_activates_data_tab_from_statistics \
+            tests.test_qt_import_shell.QtImportShellTests.test_reload_success_and_generic_load_preserve_statistics_tab
+
+      - name: Filter invalidation smoke
+        run: |
+          python -m unittest -v \
+            tests.test_qt_filters.QtFilterTests.test_apply_rules_and_clear_commit_revisions_and_zero_selected
+
+      - name: PlotPanel lifecycle smoke
+        run: |
+          python -m unittest -v \
+            tests.test_qt_scatter.QtScatterTests.test_prepare_render_and_draw_failures_preserve_previous_figure \
+            tests.test_qt_scatter.QtScatterTests.test_pending_draw_idle_is_neutralized_before_canvas_detaches
+
+      - name: Ruff focal
+        run: |
+          python -m ruff check \
+            src/csv_analyzer/qt_app/scatter_style_dialog.py \
+            src/csv_analyzer/qt_app/scatter_overlay_dialog.py \
+            src/csv_analyzer/qt_app/scatter_inset_dialog.py \
+            src/csv_analyzer/qt_app/scatter_view.py \
+            src/csv_analyzer/qt_app/scatter_controller.py \
+            tests/test_qt_scatter_advanced.py
+          python -m ruff format --check \
+            src/csv_analyzer/qt_app/scatter_style_dialog.py \
+            src/csv_analyzer/qt_app/scatter_overlay_dialog.py \
+            src/csv_analyzer/qt_app/scatter_inset_dialog.py \
+            src/csv_analyzer/qt_app/scatter_view.py \
+            src/csv_analyzer/qt_app/scatter_controller.py \
+            tests/test_qt_scatter_advanced.py
+
+      - name: Build wheel and sdist
+        run: |
+          mkdir -p dist
+          python -m build
+          sha256sum dist/* | tee dist/SHA256SUMS
+
+      - name: Clean base install without Qt extra
+        shell: bash
+        run: |
+          set -euxo pipefail
+          WHEEL="$(readlink -f "$(ls dist/*.whl)")"
+          python -m venv /tmp/varia-f4b-base
+          /tmp/varia-f4b-base/bin/python -m pip install --upgrade pip
+          /tmp/varia-f4b-base/bin/pip install \
+            -c "$GITHUB_WORKSPACE/constraints-python312.txt" "$WHEEL"
+          /tmp/varia-f4b-base/bin/pip check
+          /tmp/varia-f4b-base/bin/python - <<'PY' | tee dist/base-environment.txt
+          import importlib.util
+          assert importlib.util.find_spec("PySide6") is None
+          from csv_analyzer.plots import ScatterSpec, prepare_scatter, render_scatter
+          print("base_pyside6=ABSENT")
+          print("scatter_core_import=PASS")
+          print(ScatterSpec("x", "y"))
+          PY
+
+      - name: Clean Qt install from same wheel
+        shell: bash
+        run: |
+          set -euxo pipefail
+          WHEEL="$(readlink -f "$(ls dist/*.whl)")"
+          python -m venv /tmp/varia-f4b-qt
+          /tmp/varia-f4b-qt/bin/python -m pip install --upgrade pip
+          /tmp/varia-f4b-qt/bin/pip install \
+            -c "$GITHUB_WORKSPACE/constraints-python312.txt" "${WHEEL}[qt]"
+          /tmp/varia-f4b-qt/bin/pip check
+
+      - name: Installed Qt scatter advanced smoke
+        shell: bash
+        run: |
+          mkdir -p /tmp/varia-f4b-runtime
+          cd /tmp/varia-f4b-runtime
+          cat > scatter.csv <<'EOF'
+          x,y,c
+          1,2,10
+          2,4,20
+          3,6,30
+          4,8,40
+          EOF
+          env -u PYTHONPATH QT_QPA_PLATFORM=offscreen \
+            /tmp/varia-f4b-qt/bin/python - <<'PY' | tee "$GITHUB_WORKSPACE/dist/qt-scatter-advanced-smoke.txt"
+          from pathlib import Path
+          from unittest.mock import patch
+          from PySide6.QtCore import QEventLoop, QTimer
+          from csv_analyzer.plots import InsetSpec, Overlay
+          from csv_analyzer.qt_app.bootstrap import create_application
+          from csv_analyzer.qt_app.coordinator import Lifecycle
+          from csv_analyzer.qt_app.scatter_style_dialog import ScatterStyle
+
+          def pump(predicate):
+              if predicate():
+                  return
+              loop = QEventLoop()
+              timer = QTimer()
+              timer.setInterval(2)
+              timer.timeout.connect(lambda: loop.quit() if predicate() else None)
+              timer.start()
+              QTimer.singleShot(6000, loop.quit)
+              loop.exec()
+              assert predicate()
+
+          app, coordinator, shell = create_application()
+          coordinator.start()
+          shell.show()
+          coordinator.load_path(Path("scatter.csv"))
+          pump(lambda: coordinator.runner.activity.physical == 0)
+
+          view = shell.scatter_view
+          view.color.setCurrentText("c")
+          view.style = ScatterStyle(
+              title="Advanced smoke",
+              x_label="X custom",
+              y_label="Y custom",
+              color_label="C custom",
+              marker="s",
+              cmap="plasma",
+              sample_limit=3,
+          )
+          view.overlays = (
+              Overlay("Horizontal line", y=4),
+              Overlay("Text", x=2, y=5, text="note"),
+          )
+          view.inset = InsetSpec(1, 3, 2, 7)
+          coordinator.scatter_controller.request_plot()
+          pump(lambda: coordinator.runner.activity.physical == 0)
+
+          figure = view.panel.figure
+          assert figure is not None
+          assert figure.axes[0].get_title() == "Advanced smoke"
+          assert figure.axes[0].get_xlabel() == "X custom"
+          assert any(text.get_text() == "note" for text in figure.axes[0].texts)
+
+          with patch(
+              "csv_analyzer.qt_app.plot_panel.choose_save_path",
+              return_value=Path("advanced.png"),
+          ):
+              view.panel.export_current_figure()
+          assert Path("advanced.png").exists()
+
+          coordinator.scatter_controller.reset_settings()
+          assert not view.panel.has_figure
+          assert view.style == ScatterStyle()
+
+          shell.close()
+          pump(lambda: coordinator.lifecycle is Lifecycle.CLOSED and not shell.isVisible())
+          print("qt_scatter_advanced_smoke=PASS")
+          print("qt_lifecycle=CLOSED")
+          PY
+
+      - name: Record evidence
+        run: |
+          cp /tmp/f4b-tests.txt dist/f4b-tests.txt
+          cp /tmp/f4b-structural.txt dist/f4b-structural.txt
+          {
+            echo "commit=$(git rev-parse HEAD)"
+            echo "tree=$(git rev-parse HEAD^{tree})"
+            echo "baseline=989d7f70d09fec860f62ce037d53ab047eb550fa"
+            echo "python=$(python --version 2>&1)"
+            echo "pyside6=$(python -c 'import PySide6; print(PySide6.__version__)')"
+            echo "pandas=$(python -c 'import pandas; print(pandas.__version__)')"
+          } | tee dist/f4b-environment.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: f4-b-evidence
+          path: dist/*
+          if-no-files-found: error
