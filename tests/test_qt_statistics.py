@@ -172,9 +172,7 @@ class StatisticsQtTests(unittest.TestCase):
         snap = coordinator.state.snapshot()
         mask = np.array([False, True, True, False, False, False])
         self.assertTrue(
-            coordinator.state.commit_filters(
-                snap.revision, (FilterRule("x", 2, 3),), mask
-            )
+            coordinator.state.commit_filters(snap.revision, (FilterRule("x", 2, 3),), mask)
         )
         numeric = self.compute(coordinator).set_index("Column")
         self.assertEqual(numeric.loc["x", "Rows"], 2)
