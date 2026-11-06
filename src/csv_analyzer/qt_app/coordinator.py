@@ -253,7 +253,7 @@ class QtCoordinator(QObject):
             "Data files (*.csv *.dat *.tsv *.txt);;All files (*)",
         )
         if path:
-            self.load_path(path)
+            self.load_path(path, activate_data_on_success=True)
 
     @Slot()
     def reload_file(self) -> TaskToken | None:
@@ -296,7 +296,12 @@ class QtCoordinator(QObject):
     def _on_import_dialog_finished(self, _result: int) -> None:
         self._import_dialog = None
 
-    def load_path(self, path: str | Path) -> TaskToken | None:
+    def load_path(
+        self,
+        path: str | Path,
+        *,
+        activate_data_on_success: bool = False,
+    ) -> TaskToken | None:
         if self.lifecycle is not Lifecycle.RUNNING:
             return None
         path = Path(path).expanduser()
@@ -311,6 +316,8 @@ class QtCoordinator(QObject):
             if self.state.commit_dataset(ticket, dataset):
                 current_shell = self._shell()
                 if current_shell is not None:
+                    if activate_data_on_success:
+                        current_shell.tabs.setCurrentWidget(current_shell.data_tab)
                     current_shell.set_status(
                         f"Loaded {dataset.path.name} · {len(dataset.frame):,} rows"
                     )
