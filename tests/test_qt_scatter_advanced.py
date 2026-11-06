@@ -19,7 +19,6 @@ from PySide6.QtWidgets import QApplication, QDialog
 
 from csv_analyzer.data import CancelledError, DataError, Dataset, describe_columns
 from csv_analyzer.plots import (
-    AxisSpec,
     InsetSpec,
     Overlay,
     ScatterSpec,
