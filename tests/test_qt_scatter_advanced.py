@@ -489,8 +489,9 @@ class ScatterAdvancedTests(unittest.TestCase):
         self.assertIsNotNone(spec.inset)
 
         figure = view.panel.figure
-        self.assertGreaterEqual(len(figure.axes), 3)
+        self.assertGreaterEqual(len(figure.axes), 2)
         main = figure.axes[0]
+        self.assertEqual(len(main.child_axes), 1)
         self.assertEqual(main.get_title(), "Advanced")
         self.assertEqual(main.get_xlabel(), "|custom x|")
         self.assertEqual(main.get_ylabel(), "custom y")
@@ -532,7 +533,7 @@ class ScatterAdvancedTests(unittest.TestCase):
         self.assertIs(exported[1], figure_b)
         self.assertIsNot(figure_a, figure_b)
         self.assertEqual(figure_b.axes[0].get_title(), "B")
-        self.assertGreaterEqual(len(figure_b.axes), 2)
+        self.assertEqual(len(figure_b.axes[0].child_axes), 1)
 
 
 class ScatterAdvancedStructuralTests(unittest.TestCase):
