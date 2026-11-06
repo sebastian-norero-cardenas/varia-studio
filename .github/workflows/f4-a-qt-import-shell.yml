@@ -1,0 +1,261 @@
+name: F4.A Qt import shell
+
+on:
+  push:
+    branches:
+      - feat/f4-a-qt-import-shell
+
+permissions:
+  contents: read
+
+jobs:
+  focal-python:
+    name: F4.A focal / Python ${{ matrix.python-version }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12"]
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONFAULTHANDLER: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Ubuntu Qt runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libegl1 libgl1 libopengl0 libfontconfig1 \
+            libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 \
+            libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 \
+            libxcb-util1 libxcb-xinerama0 libxcb-xkb1
+
+      - name: Install focal environment
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python -m pip install --upgrade pip
+          if [ "${{ matrix.python-version }}" = "3.12" ]; then
+            python -m pip install -c constraints-python312.txt -e '.[dev,qt]'
+          else
+            python -m pip install -e '.[dev,qt]'
+          fi
+
+      - name: F4.A focal
+        run: python -m unittest -v tests.test_qt_import_shell
+
+  verify:
+    name: F4.A regressions / build / installed smoke
+    needs: focal-python
+    runs-on: ubuntu-22.04
+    timeout-minutes: 70
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONFAULTHANDLER: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify baseline ancestry
+        run: |
+          set -euxo pipefail
+          test "$(git merge-base HEAD 36b7e2e0b85db8973614b36b882147ebdecfab61)" = \
+            "36b7e2e0b85db8973614b36b882147ebdecfab61"
+          test -z "$(git status --porcelain)"
+          git rev-parse HEAD
+          git rev-parse HEAD^{tree}
+
+      - name: Install Ubuntu GUI runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            xvfb python3-tk libegl1 libgl1 libopengl0 libfontconfig1 \
+            libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 \
+            libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 \
+            libxcb-util1 libxcb-xinerama0 libxcb-xkb1
+
+      - name: Install development environment
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -c constraints-python312.txt -e '.[dev,qt]'
+
+      - name: F4.A focal
+        run: python -m unittest -v tests.test_qt_import_shell | tee /tmp/f4a-tests.txt
+
+      - name: Data/import core regression
+        run: python -m unittest -v tests.test_data_state | tee /tmp/f4a-data.txt
+
+      - name: F3.A load and lifecycle probes
+        run: |
+          python -m unittest -v \
+            tests.test_qt_foundation.CoordinatorContractTests.test_callback_and_dataset_commit_run_on_gui_thread \
+            tests.test_qt_foundation.CoordinatorContractTests.test_failed_b_from_filtered_a_preserves_state_and_revisions \
+            tests.test_qt_foundation.CoordinatorContractTests.test_load_replacement_waits_for_physical_predecessor \
+            tests.test_qt_foundation.CoordinatorContractTests.test_close_with_active_temporarily_noncancelable_worker
+
+      - name: F3.B table smoke
+        run: |
+          python -m unittest -v \
+            tests.test_qt_table.QtTableTests.test_model_rows_columns_source_identity_headers_display_tooltip_and_flags \
+            tests.test_qt_table.QtTableTests.test_copy_uses_underlying_values_exactly_and_does_not_change_app_state \
+            tests.test_qt_table.QtTableTests.test_failed_and_cancelled_replacement_preserve_active_dataset_and_table
+
+      - name: F3.C filter smoke
+        run: |
+          python -m unittest -v \
+            tests.test_qt_filters.QtFilterTests.test_filter_button_enablement_and_label \
+            tests.test_qt_filters.QtFilterTests.test_apply_rules_and_clear_commit_revisions_and_zero_selected \
+            tests.test_qt_filters.QtFilterTests.test_failure_and_cancel_preserve_previous_selection
+
+      - name: F3.D to F3.G lightweight smoke
+        run: |
+          python -m unittest -v \
+            tests.test_qt_scatter.QtScatterTests.test_ui_states_and_toolbar_without_save \
+            tests.test_qt_histogram.QtHistogramTests.test_ui_states_tab_order_and_single_numeric_column \
+            tests.test_qt_statistics.StatisticsQtTests.test_shell_defaults_and_result_model_formatting \
+            tests.test_qt_exporting.QtExportTests.test_figure_button_state_and_current_figure_replacement \
+            tests.test_qt_exporting.QtExportTests.test_real_qfiledialog_suffix_follows_selected_filter
+
+      - name: Ruff focal
+        run: |
+          python -m ruff check \
+            src/csv_analyzer/qt_app/import_dialog.py \
+            src/csv_analyzer/qt_app/shell.py \
+            src/csv_analyzer/qt_app/coordinator.py \
+            tests/test_qt_import_shell.py
+          python -m ruff format --check \
+            src/csv_analyzer/qt_app/import_dialog.py \
+            src/csv_analyzer/qt_app/shell.py \
+            src/csv_analyzer/qt_app/coordinator.py \
+            tests/test_qt_import_shell.py
+
+      - name: Build wheel and sdist
+        run: |
+          mkdir -p dist
+          python -m build
+          sha256sum dist/* | tee dist/SHA256SUMS
+
+      - name: Clean base install without Qt extra
+        shell: bash
+        run: |
+          set -euxo pipefail
+          WHEEL="$(readlink -f "$(ls dist/*.whl)")"
+          python -m venv /tmp/varia-f4a-base
+          /tmp/varia-f4a-base/bin/python -m pip install --upgrade pip
+          /tmp/varia-f4a-base/bin/pip install \
+            -c "$GITHUB_WORKSPACE/constraints-python312.txt" "$WHEEL"
+          /tmp/varia-f4a-base/bin/pip check
+          /tmp/varia-f4a-base/bin/python - <<'PY' | tee dist/base-environment.txt
+          import importlib.util
+          assert importlib.util.find_spec("PySide6") is None
+          from csv_analyzer.data import ImportOptions, load_dataset
+          print("base_pyside6=ABSENT")
+          print("import_core=PASS")
+          print(ImportOptions())
+          PY
+
+      - name: Clean Qt install from same wheel
+        shell: bash
+        run: |
+          set -euxo pipefail
+          WHEEL="$(readlink -f "$(ls dist/*.whl)")"
+          python -m venv /tmp/varia-f4a-qt
+          /tmp/varia-f4a-qt/bin/python -m pip install --upgrade pip
+          /tmp/varia-f4a-qt/bin/pip install \
+            -c "$GITHUB_WORKSPACE/constraints-python312.txt" "${WHEEL}[qt]"
+          /tmp/varia-f4a-qt/bin/pip check
+
+      - name: Installed Qt import/reload smoke
+        shell: bash
+        run: |
+          mkdir -p /tmp/varia-f4a-runtime
+          cd /tmp/varia-f4a-runtime
+          cat > active.csv <<'EOF'
+          x;y
+          1;2
+          3;4
+          EOF
+          env -u PYTHONPATH QT_QPA_PLATFORM=offscreen \
+            /tmp/varia-f4a-qt/bin/python - <<'PY' | tee "$GITHUB_WORKSPACE/dist/qt-import-smoke.txt"
+          from pathlib import Path
+          from PySide6.QtCore import QEventLoop, QTimer
+          from csv_analyzer.data import ImportOptions
+          from csv_analyzer.qt_app.bootstrap import create_application
+          from csv_analyzer.qt_app.coordinator import Lifecycle
+
+          def pump(predicate):
+              if predicate():
+                  return
+              loop = QEventLoop()
+              timer = QTimer()
+              timer.setInterval(2)
+              timer.timeout.connect(lambda: loop.quit() if predicate() else None)
+              timer.start()
+              QTimer.singleShot(6000, loop.quit)
+              loop.exec()
+              assert predicate()
+
+          app, coordinator, shell = create_application()
+          coordinator.start()
+          shell.show()
+          assert shell.windowTitle() == "Varia Studio"
+          assert shell.open_action.shortcut().toString() == "Ctrl+O"
+          assert shell.reload_action.shortcut().toString() == "Ctrl+R"
+
+          coordinator.import_options = ImportOptions(delimiter=";", header="yes")
+          coordinator.load_path(Path("active.csv"))
+          pump(lambda: coordinator.runner.activity.physical == 0)
+          assert len(coordinator.state.dataset.frame) == 2
+          assert shell.reload_button.isEnabled()
+          assert "2 rows" in shell.dataset_label.text()
+
+          dialog = coordinator.open_import_options()
+          dialog.encoding.setCurrentText("utf-8")
+          dialog._save()
+          assert coordinator.import_options.encoding == "utf-8"
+
+          Path("active.csv").write_text("x;y\n10;20\n", encoding="utf-8")
+          coordinator.reload_file()
+          pump(lambda: coordinator.runner.activity.physical == 0)
+          assert len(coordinator.state.dataset.frame) == 1
+          assert coordinator.state.dataset.frame.iloc[0]["x"] == 10
+
+          shell.close()
+          pump(lambda: coordinator.lifecycle is Lifecycle.CLOSED and not shell.isVisible())
+          print("qt_import_reload_smoke=PASS")
+          print("qt_lifecycle=CLOSED")
+          PY
+
+      - name: Record evidence
+        run: |
+          cp /tmp/f4a-tests.txt dist/f4a-tests.txt
+          cp /tmp/f4a-data.txt dist/f4a-data.txt
+          {
+            echo "commit=$(git rev-parse HEAD)"
+            echo "tree=$(git rev-parse HEAD^{tree})"
+            echo "baseline=36b7e2e0b85db8973614b36b882147ebdecfab61"
+            echo "python=$(python --version 2>&1)"
+            echo "pyside6=$(python -c 'import PySide6; print(PySide6.__version__)')"
+            echo "pandas=$(python -c 'import pandas; print(pandas.__version__)')"
+          } | tee dist/f4a-environment.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: f4-a-evidence
+          path: dist/*
+          if-no-files-found: error
