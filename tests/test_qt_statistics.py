@@ -210,7 +210,7 @@ class StatisticsQtTests(unittest.TestCase):
         self.assertIn("Settings changed", shell.statistics_view.local_status.text())
         result = self.compute(coordinator)
         settings = coordinator.statistics_controller.current_settings
-        coordinator.statistics_controller._present_error = lambda _error: None
+        coordinator._present_error = lambda _error: None
         coordinator.load_path("B.csv")
         pump_until(lambda: coordinator.runner.activity.physical == 0)
         self.assertIs(coordinator.statistics_controller.current_result, result)
