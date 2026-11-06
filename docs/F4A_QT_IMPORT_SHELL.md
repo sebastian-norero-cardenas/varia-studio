@@ -128,3 +128,118 @@ fixtures. The 500-row sample may be used for manual/physical functional flow,
 but it is not performance evidence.
 
 `F3A-SIGSEGV-CI = INDETERMINATE` remains unchanged.
+
+
+## Final QA and integration record
+
+Initial F4.A candidate:
+
+```text
+8421a86ef0a293ba7192a3570ce1232087bbe0c2
+```
+
+The initial independent QA result was:
+
+```text
+QA06-F4A-01 = NOT VERIFIED
+F4A-QA-01 = MEDIUM / OPEN
+```
+
+The confirmed defect was:
+
+```text
+Statistics active
+-> Open succeeds
+-> new dataset is committed
+-> Statistics incorrectly remains active
+```
+
+F4.A-R1 made the Open navigation intent explicit and focal. The final contract is:
+
+```text
+Open success
+-> commit_dataset() succeeds
+-> Data becomes active
+```
+
+The navigation occurs only after a successful dataset commit. The following
+cases preserve the current tab:
+
+```text
+Open cancel       -> current tab
+Open failure      -> current tab
+Open cancellation -> current tab
+superseded Open   -> no late navigation
+Reload success    -> current tab
+generic load_path -> current tab
+```
+
+Only Open sets:
+
+```text
+activate_data_on_success=True
+```
+
+Reload and generic/programmatic `load_path()` calls preserve the default
+`False`.
+
+Final R1 candidate:
+
+```text
+2ab6fc327ee315e85af14fd5eff00e3874c68009
+tree 12a55321d05cdf37600185f0318bb69133598beb
+```
+
+Final QA state:
+
+```text
+QA06-F4A-01-R1 = VERIFIED
+F4A-QA-01 = CLOSED
+PHYSICAL_OPEN_DATA_TAB_R1 = PASS
+SOURCE_REPO_UNTOUCHED = PASS
+```
+
+Final R1 evidence:
+
+```text
+F4.A Python 3.10  21/21 PASS
+F4.A Python 3.12  21/21 PASS
+independent R1     10/10 PASS
+Ruff                      PASS
+PHYSICAL X11              PASS
+
+Workflow: F4.A Qt import shell
+Run: 42264654878
+Run number: 4
+Attempt: 1
+Result: SUCCESS
+Artifact: f4-a-evidence
+Artifact ID: 13526343081
+Digest: sha256:3032b59bf4ed702141332f9d781fe8170f54fa41755ab75c6faa6498305743e4
+```
+
+The final F4.A Qt capability set includes:
+
+```text
+Import options...
+Open...
+Reload
+Ctrl+O
+Ctrl+R
+dataset summary
+selected count
+import notices
+Guide
+```
+
+Import Options covers delimiter, encoding, header, decimal and explicit ISO date
+columns. `comment` remains preserved by the existing `ImportOptions` contract
+without a dedicated F4.A UI.
+
+F4.A-R1 was integrated into `main` by fast-forward from production
+`36b7e2e0b85db8973614b36b882147ebdecfab61` to the final R1 candidate
+`2ab6fc327ee315e85af14fd5eff00e3874c68009`, preserving the candidate tree
+unchanged.
+
+`F3A-SIGSEGV-CI = INDETERMINATE` remains unchanged. It did not reappear during
+F4.A-R1 and is not considered resolved.
