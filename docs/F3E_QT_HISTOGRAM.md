@@ -4,6 +4,26 @@ F3.E migrates histogram distributions to the Qt frontend without changing the
 toolkit-neutral scientific engine in `plots.py`. It reuses the QtAgg
 `PlotPanel` lifecycle closed by F3.D-R2.
 
+
+## Final integration record
+
+F3.E was integrated into `main` by fast-forward from the authorized candidate
+`34ba5d574d1286e2f02387364ea219ded41047f6` (tree
+`a2691ee1ba94419e3559b83f441f3ab2c84c9849`).
+
+Final verification state:
+
+- `F3.E IMPLEMENTED`.
+- `QA06-F3E-01 = VERIFIED`.
+- Physical X11 UI gate: PASS.
+- Open F3.E blockers: none.
+- Final regression evidence: F3.E Python 3.10 18/18 PASS; F3.E Python 3.12
+  18/18 PASS; S-200K 2/2 PASS; plots 26/26 PASS; F3.D 18/18 PASS; F3.C
+  22/22 PASS; F3.B 42/42 PASS; F3.A 40/40 PASS; historical/core 56/56 PASS;
+  Ruff PASS.
+- `F3A-SIGSEGV-CI = INDETERMINATE`; it did not reappear during F3.E and is
+  not considered resolved.
+
 ## Architecture
 
 `HistogramView` owns only controls and builds `HistogramSpec`.
