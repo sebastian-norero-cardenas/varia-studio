@@ -120,7 +120,7 @@ class PlotConfigurationTests(unittest.TestCase):
     @staticmethod
     def user_check(check, value):
         check.setChecked(value)
-        check.clicked.emit(value)
+        check.clicked.emit()
 
     @staticmethod
     def user_text(edit, value):
