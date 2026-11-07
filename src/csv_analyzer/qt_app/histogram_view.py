@@ -1,4 +1,4 @@
-"""F3.E minimal Qt histogram controls."""
+"""Qt histogram controls with coherent staged plot configuration."""
 
 from __future__ import annotations
 
@@ -75,10 +75,13 @@ class HistogramAxisControls(QGroupBox):
 
 class HistogramView(QWidget):
     plot_requested = Signal()
+    reset_requested = Signal()
+    settings_updated = Signal(str)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._dataset: Dataset | None = None
+        self._plot_settings_revision = 0
 
         outer = QHBoxLayout(self)
         controls_scroll = QScrollArea(self)
@@ -129,6 +132,13 @@ class HistogramView(QWidget):
         y_form.addRow("", self.scientific_y)
         controls.addWidget(y_group)
 
+        title_group = QGroupBox("Figure", controls_host)
+        title_form = QFormLayout(title_group)
+        self.title = QLineEdit(title_group)
+        self.title.setPlaceholderText("Optional")
+        title_form.addRow("Title", self.title)
+        controls.addWidget(title_group)
+
         self.local_status = QLabel("Load a dataset to plot a distribution.", controls_host)
         self.local_status.setWordWrap(True)
         controls.addWidget(self.local_status)
@@ -137,6 +147,11 @@ class HistogramView(QWidget):
         self.plot_button.setEnabled(False)
         self.plot_button.clicked.connect(self.plot_requested)
         controls.addWidget(self.plot_button)
+
+        self.reset_button = QPushButton("Reset settings", controls_host)
+        self.reset_button.setEnabled(False)
+        self.reset_button.clicked.connect(self.reset_requested)
+        controls.addWidget(self.reset_button)
         controls.addStretch(1)
 
         controls_scroll.setWidget(controls_host)
@@ -145,9 +160,21 @@ class HistogramView(QWidget):
         self.panel = PlotPanel("Choose a numeric column, then plot.", self)
         outer.addWidget(self.panel, 1)
         self._sync_custom_bins()
+        self._connect_plot_setting_signals()
+
+    @property
+    def plot_settings_revision(self) -> int:
+        return self._plot_settings_revision
 
     def set_dataset(self, dataset: Dataset | None) -> None:
         self._dataset = dataset
+        self._reset_controls(dataset)
+
+    def reset_settings(self) -> None:
+        self._reset_controls(self._dataset)
+
+    def _reset_controls(self, dataset: Dataset | None) -> None:
+        self._plot_settings_revision += 1
         columns = dataset.numeric_columns if dataset is not None else ()
         self.column.clear()
         self.column.addItems(columns)
@@ -158,6 +185,7 @@ class HistogramView(QWidget):
         self.normalization.setCurrentIndex(0)
         self.log_y.setChecked(False)
         self.scientific_y.setChecked(False)
+        self.title.clear()
         self._sync_custom_bins()
 
         if dataset is None:
@@ -174,6 +202,7 @@ class HistogramView(QWidget):
             enabled = True
         self.local_status.setText(message)
         self.plot_button.setEnabled(enabled)
+        self.reset_button.setEnabled(enabled)
 
     def build_spec(self) -> HistogramSpec:
         if self._dataset is None:
@@ -204,13 +233,42 @@ class HistogramView(QWidget):
             density=bool(self.normalization.currentData()),
             log_y=self.log_y.isChecked(),
             scientific_y=self.scientific_y.isChecked(),
-            title="",
+            title=self.title.text(),
             color="#178F80",
             opacity=0.85,
         )
 
     def set_feedback(self, text: str) -> None:
         self.local_status.setText(text)
+
+    def _connect_plot_setting_signals(self) -> None:
+        for combo in (self.column, self.axis.scale, self.bin_mode, self.normalization):
+            combo.activated.connect(self._plot_setting_changed)
+
+        for checkbox in (
+            self.axis.absolute,
+            self.axis.scientific,
+            self.log_bins,
+            self.log_y,
+            self.scientific_y,
+        ):
+            checkbox.clicked.connect(self._plot_setting_changed)
+
+        for edit in (
+            self.axis.minimum,
+            self.axis.maximum,
+            self.custom_bins,
+            self.title,
+        ):
+            edit.textEdited.connect(self._plot_setting_changed)
+
+    def _plot_setting_changed(self, *_args) -> None:
+        if self._dataset is None:
+            return
+        self._plot_settings_revision += 1
+        message = "Settings changed. Plot again to apply them."
+        self.set_feedback(message)
+        self.settings_updated.emit(message)
 
     def _sync_custom_bins(self) -> None:
         self.custom_bins.setEnabled(self.bin_mode.currentData() == "custom")
