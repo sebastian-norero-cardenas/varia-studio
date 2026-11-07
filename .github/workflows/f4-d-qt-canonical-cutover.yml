@@ -1,0 +1,634 @@
+name: F4.D Qt canonical cutover
+
+on:
+  push:
+    branches:
+      - feat/f4-d-qt-canonical-cutover
+
+permissions:
+  contents: read
+
+jobs:
+  focal-python:
+    name: F4.D focal / Python ${{ matrix.python-version }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 55
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12"]
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONFAULTHANDLER: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Linux GUI runtimes
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            python3-tk xvfb \
+            libegl1 libgl1 libopengl0 libfontconfig1 \
+            libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 \
+            libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 \
+            libxcb-util1 libxcb-xinerama0 libxcb-xkb1
+
+      - name: Install focal environment
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python -m pip install --upgrade pip
+          if [ "${{ matrix.python-version }}" = "3.12" ]; then
+            python -m pip install -c constraints-python312.txt -e '.[dev,legacy]'
+          else
+            python -m pip install -e '.[dev,legacy]'
+          fi
+          python -m pip check
+
+      - name: Canonical identity and routing
+        run: |
+          python -m unittest -v \
+            tests.test_identity \
+            tests.test_qt_cutover \
+            tests.test_qt_foundation.SeparationGateTests
+
+      - name: Import laziness smoke
+        run: |
+          python - <<'PY'
+          import sys
+          import csv_analyzer
+          assert "PySide6.QtWidgets" not in sys.modules
+          assert "customtkinter" not in sys.modules
+          print("csv_analyzer_import_lazy=PASS")
+          PY
+
+  verify:
+    name: F4.D packaging / runtime / teardown / regressions
+    needs: focal-python
+    runs-on: ubuntu-22.04
+    timeout-minutes: 110
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONFAULTHANDLER: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify baseline ancestry
+        run: |
+          set -euxo pipefail
+          test "$(git merge-base HEAD 23dcb088a2c987769f89d231790baf0e767397e5)" = \
+            "23dcb088a2c987769f89d231790baf0e767397e5"
+          test -z "$(git status --porcelain)"
+          git rev-parse HEAD
+          git rev-parse HEAD^{tree}
+
+      - name: Install Linux GUI runtimes
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            python3-tk xvfb \
+            libegl1 libgl1 libopengl0 libfontconfig1 \
+            libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 \
+            libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 \
+            libxcb-util1 libxcb-xinerama0 libxcb-xkb1
+
+      - name: Install development + legacy regression environment
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -c constraints-python312.txt -e '.[dev,legacy]'
+          python -m pip check
+
+      - name: Canonical entrypoint focal
+        run: |
+          mkdir -p evidence
+          python -m unittest -v \
+            tests.test_identity \
+            tests.test_qt_cutover \
+            tests.test_qt_foundation.SeparationGateTests \
+            2>&1 | tee evidence/entrypoints.txt
+
+      - name: Qt regression focal F3.A through F4.C
+        run: |
+          {
+            echo "=== F3.A scheduler/lifecycle ==="
+            python -m unittest -v \
+              tests.test_qt_foundation.CoordinatorContractTests.test_callback_and_dataset_commit_run_on_gui_thread \
+              tests.test_qt_foundation.CoordinatorContractTests.test_cancel_and_late_result_never_publish \
+              tests.test_qt_foundation.CoordinatorContractTests.test_load_replacement_waits_for_physical_predecessor \
+              tests.test_qt_foundation.CoordinatorContractTests.test_close_with_active_temporarily_noncancelable_worker \
+              tests.test_qt_foundation.ShellCloseProbeTests.test_quit_button_exits_real_event_loop
+            echo "=== F3.B table ==="
+            python -m unittest -v \
+              tests.test_qt_table.QtTableTests.test_model_rows_columns_source_identity_headers_display_tooltip_and_flags \
+              tests.test_qt_table.QtTableTests.test_copy_uses_underlying_values_exactly_and_does_not_change_app_state \
+              tests.test_qt_table.QtTableTests.test_close_detaches_table_model_before_qobject_teardown
+            echo "=== F3.C filters ==="
+            python -m unittest -v \
+              tests.test_qt_filters.QtFilterTests.test_apply_rules_and_clear_commit_revisions_and_zero_selected \
+              tests.test_qt_filters.QtFilterTests.test_latest_request_wins \
+              tests.test_qt_filters.QtFilterTests.test_failure_and_cancel_preserve_previous_selection
+            echo "=== F3.D scatter ==="
+            python -m unittest -v \
+              tests.test_qt_scatter.QtScatterTests.test_latest_request_wins \
+              tests.test_qt_scatter.QtScatterTests.test_dataset_and_selection_changes_invalidate_plot_but_failed_load_does_not \
+              tests.test_qt_scatter.QtScatterTests.test_close_with_active_worker_never_publishes
+            echo "=== F3.E histogram ==="
+            python -m unittest -v \
+              tests.test_qt_histogram.QtHistogramTests.test_latest_histogram_request_wins \
+              tests.test_qt_histogram.QtHistogramTests.test_pending_histogram_is_invalidated_by_selection_revision_change \
+              tests.test_qt_histogram.QtHistogramTests.test_close_visible_figure_and_active_worker
+            echo "=== F3.F statistics ==="
+            python -m unittest -v \
+              tests.test_qt_statistics.StatisticsQtTests.test_numeric_semantics_sample_population_missing_infinite_huge_single \
+              tests.test_qt_statistics.StatisticsQtTests.test_latest_request_wins_for_ddof_mode_and_columns \
+              tests.test_qt_statistics.StatisticsQtTests.test_empty_modes_errors_model_failure_and_close_active_worker
+            echo "=== F3.G export ==="
+            python -m unittest -v \
+              tests.test_qt_exporting.QtExportTests.test_figure_png_pdf_svg_and_dpi_values \
+              tests.test_qt_exporting.QtExportTests.test_stale_figure_dialog_guard_prevents_export \
+              tests.test_qt_exporting.QtExportTests.test_close_with_save_dialog_open_rejects_dialog_and_closes_cleanly
+            echo "=== F4.A import/shell ==="
+            python -m unittest -v \
+              tests.test_qt_import_shell.QtImportShellTests.test_open_success_activates_data_tab_from_statistics \
+              tests.test_qt_import_shell.QtImportShellTests.test_reload_and_open_share_latest_load_semantics \
+              tests.test_qt_import_shell.QtImportShellTests.test_import_dialog_survives_dataset_commit_and_application_close_rejects_it
+            echo "=== F4.B advanced scatter ==="
+            python -m unittest -v tests.test_qt_scatter_advanced.ScatterAdvancedTests
+            echo "=== F4.C plot coherence ==="
+            python -m unittest -v tests.test_qt_plot_configuration.PlotConfigurationTests
+          } 2>&1 | tee evidence/regressions.txt
+
+      - name: Legacy regression focal
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          {
+            echo "legacy_import=BEGIN"
+            python - <<'PY'
+          import customtkinter
+          import csv_analyzer.app
+          print("customtkinter_version=" + customtkinter.__version__)
+          print("legacy_module_import=PASS")
+          PY
+            echo "legacy_non_gui=BEGIN"
+            python -m unittest -v \
+              tests.test_application \
+              tests.test_export_callbacks \
+              tests.test_table
+            echo "legacy_xvfb_gui=BEGIN"
+            xvfb-run -a python -m unittest -v \
+              tests.test_gui.DesktopTests.test_startup_dialogs_and_resize \
+              tests.test_gui.DesktopTests.test_close_after_plot
+          } 2>&1 | tee evidence/legacy-regressions.txt
+
+      - name: Ruff
+        run: |
+          python -m ruff check src tests tools
+          python -m ruff format --check src tests tools
+
+      - name: Build wheel and sdist
+        run: |
+          mkdir -p dist
+          python -m build
+          sha256sum dist/* | tee dist/SHA256SUMS
+
+      - name: Inspect wheel packaging metadata
+        shell: bash
+        run: |
+          set -euxo pipefail
+          WHEEL="$(readlink -f "$(ls dist/*.whl)")"
+          export WHEEL
+          python - <<'PY' | tee evidence/package-metadata.txt
+          import os
+          import zipfile
+
+          wheel = os.environ["WHEEL"]
+          with zipfile.ZipFile(wheel) as archive:
+              metadata_name = next(name for name in archive.namelist() if name.endswith(".dist-info/METADATA"))
+              entry_name = next(name for name in archive.namelist() if name.endswith(".dist-info/entry_points.txt"))
+              metadata = archive.read(metadata_name).decode("utf-8")
+              entrypoints = archive.read(entry_name).decode("utf-8")
+
+          print("wheel=" + wheel)
+          print("--- METADATA relevant lines ---")
+          for line in metadata.splitlines():
+              if line.startswith(("Name:", "Version:", "Requires-Dist:", "Provides-Extra:")):
+                  print(line)
+          print("--- entry_points.txt ---")
+          print(entrypoints.rstrip())
+
+          assert "Name: csv-analyzer-desktop" in metadata
+          assert "Version: 2.1.0" in metadata
+          assert "Requires-Dist: PySide6" in metadata
+          assert "Provides-Extra: legacy" in metadata
+          assert "Provides-Extra: qt" in metadata
+          base_ctk = [
+              line for line in metadata.splitlines()
+              if line.startswith("Requires-Dist: customtkinter") and "extra == " not in line
+          ]
+          assert not base_ctk, base_ctk
+          assert "customtkinter" in metadata and 'extra == "legacy"' in metadata
+          expected = (
+              "varia-studio = csv_analyzer.qt_app:main",
+              "csv-analyzer = csv_analyzer.qt_app:main",
+              "varia-studio-qt = csv_analyzer.qt_app:main",
+          )
+          for line in expected:
+              assert line in entrypoints, line
+          print("packaging_metadata=PASS")
+          PY
+
+      - name: Clean canonical wheel install
+        shell: bash
+        run: |
+          set -euxo pipefail
+          WHEEL="$(readlink -f "$(ls dist/*.whl)")"
+          VENV=/tmp/varia-f4d-canonical
+          python -m venv "$VENV"
+          "$VENV/bin/python" -m pip install --upgrade pip
+          "$VENV/bin/pip" install -c "$GITHUB_WORKSPACE/constraints-python312.txt" "$WHEEL"
+          "$VENV/bin/pip" check
+          {
+            "$VENV/bin/python" - <<'PY'
+          import importlib.metadata
+          import importlib.util
+          import sys
+
+          assert importlib.util.find_spec("PySide6") is not None
+          assert importlib.util.find_spec("customtkinter") is None
+          import csv_analyzer
+          assert "PySide6.QtWidgets" not in sys.modules
+
+          distribution = importlib.metadata.distribution("csv-analyzer-desktop")
+          scripts = {
+              ep.name: ep.value
+              for ep in distribution.entry_points
+              if ep.group == "console_scripts"
+          }
+          expected = {
+              "varia-studio": "csv_analyzer.qt_app:main",
+              "csv-analyzer": "csv_analyzer.qt_app:main",
+              "varia-studio-qt": "csv_analyzer.qt_app:main",
+          }
+          assert {name: scripts.get(name) for name in expected} == expected
+          print("PySide6=PRESENT")
+          print("customtkinter=ABSENT")
+          print("import_csv_analyzer_lazy=PASS")
+          print("canonical_metadata=PASS")
+          PY
+            echo "--- varia-studio --help ---"
+            "$VENV/bin/varia-studio" --help
+            echo "--- csv-analyzer --help ---"
+            "$VENV/bin/csv-analyzer" --help
+            echo "--- varia-studio-qt --help ---"
+            "$VENV/bin/varia-studio-qt" --help
+            echo "--- python -m csv_analyzer --help ---"
+            "$VENV/bin/python" -m csv_analyzer --help
+            echo "canonical_help=PASS"
+          } 2>&1 | tee evidence/canonical-install.txt
+
+      - name: Compatible empty qt extra
+        shell: bash
+        run: |
+          set -euxo pipefail
+          WHEEL="$(readlink -f "$(ls dist/*.whl)")"
+          VENV=/tmp/varia-f4d-qt-extra
+          python -m venv "$VENV"
+          "$VENV/bin/python" -m pip install --upgrade pip
+          "$VENV/bin/pip" install -c "$GITHUB_WORKSPACE/constraints-python312.txt" "${WHEEL}[qt]"
+          "$VENV/bin/pip" check
+          "$VENV/bin/python" - <<'PY'
+          import importlib.util
+          assert importlib.util.find_spec("PySide6") is not None
+          assert importlib.util.find_spec("customtkinter") is None
+          print("qt_extra_compatibility=PASS")
+          PY
+
+      - name: Clean legacy-extra wheel install
+        shell: bash
+        run: |
+          set -euxo pipefail
+          WHEEL="$(readlink -f "$(ls dist/*.whl)")"
+          VENV=/tmp/varia-f4d-legacy
+          python -m venv "$VENV"
+          "$VENV/bin/python" -m pip install --upgrade pip
+          "$VENV/bin/pip" install -c "$GITHUB_WORKSPACE/constraints-python312.txt" "${WHEEL}[legacy]"
+          "$VENV/bin/pip" check
+          {
+            "$VENV/bin/python" - <<'PY'
+          import importlib.util
+          assert importlib.util.find_spec("PySide6") is not None
+          assert importlib.util.find_spec("customtkinter") is not None
+          import customtkinter
+          import csv_analyzer.app
+          print("PySide6=PRESENT")
+          print("customtkinter=PRESENT")
+          print("legacy_module_import=PASS")
+          PY
+          } 2>&1 | tee evidence/legacy-extra.txt
+
+      - name: README install command smoke
+        shell: bash
+        run: |
+          set -euxo pipefail
+          VENV=/tmp/varia-f4d-readme
+          python -m venv "$VENV"
+          "$VENV/bin/python" -m pip install --upgrade pip
+          "$VENV/bin/pip" install -c "$GITHUB_WORKSPACE/constraints-python312.txt" .
+          "$VENV/bin/pip" check
+          {
+            echo "README install: python -m pip install . = PASS"
+            "$VENV/bin/varia-studio" --help >/dev/null
+            echo "README varia-studio --help = PASS"
+          } 2>&1 | tee evidence/readme-smoke.txt
+
+      - name: Literal startup file arguments through installed launchers
+        shell: bash
+        run: |
+          set -euo pipefail
+          VENV=/tmp/varia-f4d-canonical
+          RUNTIME=/tmp/varia-f4d-startup
+          mkdir -p "$RUNTIME"
+          SAMPLE="$RUNTIME/sample.csv"
+          cat > "$SAMPLE" <<'EOF'
+          x,y,c
+          1,2,10
+          2,4,20
+          3,6,30
+          EOF
+
+          check_startup() {
+            label="$1"
+            shift
+            log="$RUNTIME/${label}.log"
+            QT_QPA_PLATFORM=offscreen "$@" "$SAMPLE" --debug >"$log" 2>&1 &
+            pid=$!
+            success=0
+            for _ in $(seq 1 240); do
+              if grep -Eq 'event=task_outcome_published .*key=load .*status=SUCCESS' "$log"; then
+                success=1
+                break
+              fi
+              if ! kill -0 "$pid" 2>/dev/null; then
+                break
+              fi
+              sleep 0.05
+            done
+            cat "$log"
+            if [ "$success" -ne 1 ]; then
+              kill -TERM "$pid" 2>/dev/null || true
+              wait "$pid" 2>/dev/null || true
+              echo "${label}_startup_load=FAIL"
+              return 1
+            fi
+            echo "${label}_startup_load=PASS"
+            kill -TERM "$pid" 2>/dev/null || true
+            wait "$pid" 2>/dev/null || true
+          }
+
+          {
+            cd "$RUNTIME"
+            unset PYTHONPATH || true
+            check_startup varia_studio "$VENV/bin/varia-studio"
+            check_startup python_module "$VENV/bin/python" -m csv_analyzer
+          } 2>&1 | tee evidence/startup-file.txt
+
+      - name: Installed Qt runtime smoke outside repository
+        shell: bash
+        run: |
+          set -euxo pipefail
+          VENV=/tmp/varia-f4d-canonical
+          RUNTIME=/tmp/varia-f4d-runtime
+          mkdir -p "$RUNTIME"
+          cat > "$RUNTIME/runtime_smoke.py" <<'PY'
+          from pathlib import Path
+          from PySide6.QtCore import QEventLoop, QTimer
+
+          from csv_analyzer.qt_app.bootstrap import create_application
+          from csv_analyzer.qt_app.coordinator import Lifecycle
+
+          def pump(predicate, timeout_ms=10000):
+              if predicate():
+                  return
+              loop = QEventLoop()
+              poll = QTimer()
+              timeout = QTimer()
+              expired = {"value": False}
+              poll.setInterval(2)
+              timeout.setSingleShot(True)
+              poll.timeout.connect(lambda: loop.quit() if predicate() else None)
+              timeout.timeout.connect(lambda: (expired.__setitem__("value", True), loop.quit()))
+              poll.start()
+              timeout.start(timeout_ms)
+              loop.exec()
+              poll.stop()
+              timeout.stop()
+              assert not expired["value"] or predicate()
+
+          sample = Path("sample.csv")
+          sample.write_text("x,y,c\n1,2,10\n2,4,20\n3,6,30\n4,8,40\n", encoding="utf-8")
+
+          app, coordinator, shell = create_application()
+          coordinator.start()
+          shell.show()
+          coordinator.load_path(sample)
+          pump(lambda: coordinator.runner.activity.physical == 0)
+          assert coordinator.state.dataset is not None
+          assert coordinator.state.dataset.path.name == "sample.csv"
+          assert shell.tabs.currentWidget() is shell.data_tab
+          print("runtime_load=PASS")
+
+          coordinator.scatter_controller.request_plot()
+          pump(lambda: coordinator.runner.activity.physical == 0)
+          assert shell.scatter_view.panel.figure is not None
+          print("runtime_relationships=PASS")
+
+          coordinator.histogram_controller.request_plot()
+          pump(lambda: coordinator.runner.activity.physical == 0)
+          assert shell.histogram_view.panel.figure is not None
+          print("runtime_distributions=PASS")
+
+          coordinator.statistics_controller.request_compute()
+          pump(lambda: coordinator.runner.activity.physical == 0)
+          assert coordinator.statistics_controller.current_result is not None
+          print("runtime_statistics=PASS")
+
+          shell.close()
+          pump(lambda: coordinator.lifecycle is Lifecycle.CLOSED and not shell.isVisible())
+          assert coordinator.runner.activity.physical == 0
+          print("runtime_close=CLOSED")
+          print("qt_runtime_smoke=PASS")
+          PY
+          cat > "$RUNTIME/sample.csv" <<'EOF'
+          x,y,c
+          1,2,10
+          2,4,20
+          3,6,30
+          4,8,40
+          EOF
+          (
+            cd "$RUNTIME"
+            unset PYTHONPATH || true
+            QT_QPA_PLATFORM=offscreen "$VENV/bin/python" runtime_smoke.py
+          ) 2>&1 | tee evidence/qt-runtime-smoke.txt
+
+      - name: Canonical bootstrap startup path through main()
+        shell: bash
+        run: |
+          set -euxo pipefail
+          VENV=/tmp/varia-f4d-canonical
+          RUNTIME=/tmp/varia-f4d-bootstrap-main
+          mkdir -p "$RUNTIME"
+          cat > "$RUNTIME/startup_main.py" <<'PY'
+          from pathlib import Path
+          from PySide6.QtCore import QTimer
+
+          from csv_analyzer.qt_app import bootstrap
+          from csv_analyzer.qt_app.coordinator import Lifecycle
+
+          sample = Path("sample.csv")
+          sample.write_text("x,y\n1,2\n2,4\n", encoding="utf-8")
+          real_create = bootstrap.create_application
+          holder = {}
+          timer_holder = {}
+
+          def wrapped_create():
+              app, coordinator, shell = real_create()
+              holder.update(app=app, coordinator=coordinator, shell=shell)
+              timer = QTimer(shell)
+              timer.setInterval(5)
+
+              def inspect():
+                  if coordinator.state.dataset is None:
+                      return
+                  assert coordinator.state.dataset.path.name == "sample.csv"
+                  assert shell.tabs.currentWidget() is shell.data_tab
+                  timer.stop()
+                  shell.close()
+
+              timer.timeout.connect(inspect)
+              timer.start()
+              timer_holder["timer"] = timer
+              return app, coordinator, shell
+
+          bootstrap.create_application = wrapped_create
+          rc = bootstrap.main([str(sample)])
+          assert rc == 0
+          assert holder["coordinator"].lifecycle is Lifecycle.CLOSED
+          print("bootstrap_file_argument=PASS")
+          print("bootstrap_lifecycle=CLOSED")
+          PY
+          (
+            cd "$RUNTIME"
+            unset PYTHONPATH || true
+            QT_QPA_PLATFORM=offscreen "$VENV/bin/python" startup_main.py
+          ) 2>&1 | tee evidence/bootstrap-startup.txt
+
+      - name: Shutdown and subprocess stress gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          VENV=/tmp/varia-f4d-canonical
+          RUNTIME=/tmp/varia-f4d-teardown
+          mkdir -p "$RUNTIME"
+          cp "$GITHUB_WORKSPACE/tools/f4d_teardown_probe.py" "$RUNTIME/probe.py"
+          LOG="$GITHUB_WORKSPACE/evidence/teardown-stress.txt"
+          : > "$LOG"
+          process_count=0
+          timeout_count=0
+          failure_count=0
+
+          run_probe() {
+            scenario="$1"
+            process_count=$((process_count + 1))
+            set +e
+            output="$(cd "$RUNTIME" && env -u PYTHONPATH QT_QPA_PLATFORM=offscreen \
+              timeout 20s "$VENV/bin/python" probe.py "$scenario" 2>&1)"
+            rc=$?
+            set -e
+            {
+              echo "process=${process_count} scenario=${scenario} exit_code=${rc}"
+              echo "$output"
+            } >> "$LOG"
+            if [ "$rc" -eq 124 ]; then
+              timeout_count=$((timeout_count + 1))
+            fi
+            if [ "$rc" -ne 0 ]; then
+              failure_count=$((failure_count + 1))
+            fi
+          }
+
+          for _ in $(seq 1 20); do
+            run_probe launch_close
+          done
+          for scenario in \
+            load_close scatter_close histogram_close statistics_close \
+            pending_load_close pending_scatter_close pending_histogram_close \
+            pending_statistics_close
+          do
+            run_probe "$scenario"
+          done
+
+          segfault_strings=$(grep -Eic 'SIGSEGV|Segmentation fault' "$LOG" || true)
+          {
+            echo "process_count=${process_count}"
+            echo "timeout_count=${timeout_count}"
+            echo "failure_count=${failure_count}"
+            echo "segfault_strings=${segfault_strings}"
+          } >> "$LOG"
+          cat "$LOG"
+
+          test "$process_count" -eq 28
+          test "$timeout_count" -eq 0
+          test "$failure_count" -eq 0
+          test "$segfault_strings" -eq 0
+          echo "CUTOVER_TEARDOWN_GATE=PASS" | tee -a "$LOG"
+
+      - name: Record environment and verify evidence is non-empty
+        run: |
+          {
+            echo "commit=$(git rev-parse HEAD)"
+            echo "tree=$(git rev-parse HEAD^{tree})"
+            echo "baseline=23dcb088a2c987769f89d231790baf0e767397e5"
+            echo "python=$(python --version 2>&1)"
+            echo "pyside6=$(python -c 'import PySide6; print(PySide6.__version__)')"
+            echo "customtkinter=$(python -c 'import customtkinter; print(customtkinter.__version__)')"
+            echo "F3A-SIGSEGV-CI=INDETERMINATE"
+            echo "PHYSICAL_F4D_X11=NOT TESTED"
+          } | tee evidence/environment.txt
+
+          for file in \
+            entrypoints.txt package-metadata.txt canonical-install.txt legacy-extra.txt \
+            qt-runtime-smoke.txt teardown-stress.txt regressions.txt \
+            legacy-regressions.txt readme-smoke.txt startup-file.txt bootstrap-startup.txt
+          do
+            test -s "evidence/$file"
+            echo "$file bytes=$(wc -c < "evidence/$file")"
+          done
+
+          if grep -ERi 'SIGSEGV|Segmentation fault' evidence; then
+            echo "Unexpected crash signature found in evidence."
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: f4-d-evidence
+          path: |
+            evidence/*
+            dist/*
+          if-no-files-found: error
