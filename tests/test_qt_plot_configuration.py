@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import tempfile
 import threading
 import unittest
 from pathlib import Path
@@ -16,7 +15,7 @@ import pandas as pd
 from PySide6.QtCore import QEventLoop, QTimer
 from PySide6.QtWidgets import QApplication
 
-from csv_analyzer.data import CancelledError, DataError, Dataset, describe_columns
+from csv_analyzer.data import CancelledError, Dataset, describe_columns
 from csv_analyzer.plots import (
     InsetSpec,
     Overlay,
