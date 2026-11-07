@@ -97,7 +97,7 @@ class FilterDialog(QDialog):
         self.update_button.setEnabled(False)
         self.update_button.clicked.connect(self.update_condition)
         edit_actions.addWidget(self.update_button)
-        self.new_button = QPushButton("New")
+        self.new_button = QPushButton("Clear editor")
         self.new_button.clicked.connect(self.new_condition)
         edit_actions.addWidget(self.new_button)
         self.remove_button = QPushButton("Remove")
