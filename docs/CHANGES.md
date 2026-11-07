@@ -1,5 +1,23 @@
 # Refactor and resume record
 
+## F4.D — Qt canonical cutover candidate
+
+- Routed `varia-studio`, `csv-analyzer`, `varia-studio-qt`, and
+  `python -m csv_analyzer` to the same PySide6/Qt frontend.
+- Promoted PySide6 to a base dependency and moved CustomTkinter to the optional
+  `[legacy]` extra. The historical `[qt]` extra remains as a compatible empty
+  alias during transition.
+- Retained `app.py`, `ui/`, and legacy tests without adding a new public
+  legacy launcher.
+- Updated canonical bootstrap/install documentation while keeping package
+  version `2.1.0`, distribution `csv-analyzer-desktop`, and namespace
+  `csv_analyzer` unchanged.
+- Added installed-metadata, clean-wheel, legacy-extra, runtime, shutdown and
+  subprocess-stress gates for the cutover candidate.
+- This is a cutover candidate only; it is not a final release and remains
+  subject to independent QA and physical Ubuntu/X11 validation.
+
+
 ## Varia Studio identity transition — 2.1.0
 
 - Adopted **Varia Studio** as the canonical public product name.
