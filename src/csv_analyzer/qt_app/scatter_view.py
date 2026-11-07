@@ -105,10 +105,14 @@ class ScatterView(QWidget):
         self.inset: InsetSpec | None = None
 
         outer = QHBoxLayout(self)
-        controls_scroll = QScrollArea(self)
-        controls_scroll.setWidgetResizable(True)
-        controls_scroll.setMinimumWidth(320)
-        controls_host = QWidget(controls_scroll)
+        controls_column = QWidget(self)
+        controls_column.setMinimumWidth(320)
+        controls_column_layout = QVBoxLayout(controls_column)
+        controls_column_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.controls_scroll = QScrollArea(controls_column)
+        self.controls_scroll.setWidgetResizable(True)
+        controls_host = QWidget(self.controls_scroll)
         controls = QVBoxLayout(controls_host)
 
         self.x_axis = AxisControls("X axis", controls_host)
@@ -149,23 +153,30 @@ class ScatterView(QWidget):
         advanced_layout.addWidget(self.inset_button)
         controls.addWidget(advanced_group)
 
-        self.local_status = QLabel("Load a dataset to plot relationships.", controls_host)
-        self.local_status.setWordWrap(True)
-        controls.addWidget(self.local_status)
+        controls.addStretch(1)
+        self.controls_scroll.setWidget(controls_host)
+        controls_column_layout.addWidget(self.controls_scroll, 1)
 
-        self.plot_button = QPushButton("Plot relationships", controls_host)
+        footer = QWidget(controls_column)
+        footer_layout = QVBoxLayout(footer)
+        footer_layout.setContentsMargins(0, 0, 0, 0)
+        self.local_status = QLabel("Load a dataset to plot relationships.", footer)
+        self.local_status.setWordWrap(True)
+        footer_layout.addWidget(self.local_status)
+
+        actions = QHBoxLayout()
+        self.plot_button = QPushButton("Plot relationships", footer)
         self.plot_button.setEnabled(False)
         self.plot_button.clicked.connect(self.plot_requested)
-        controls.addWidget(self.plot_button)
-
-        self.reset_button = QPushButton("Reset settings", controls_host)
+        actions.addWidget(self.plot_button)
+        self.reset_button = QPushButton("Reset all settings", footer)
         self.reset_button.setEnabled(False)
         self.reset_button.clicked.connect(self.reset_requested)
-        controls.addWidget(self.reset_button)
-        controls.addStretch(1)
+        actions.addWidget(self.reset_button)
+        footer_layout.addLayout(actions)
+        controls_column_layout.addWidget(footer)
 
-        controls_scroll.setWidget(controls_host)
-        outer.addWidget(controls_scroll)
+        outer.addWidget(controls_column)
 
         self.panel = PlotPanel(
             "Choose numeric X and Y columns, then plot.",
@@ -237,6 +248,7 @@ class ScatterView(QWidget):
             message = f"{len(columns)} numeric columns available."
             enabled = True
         self.local_status.setText(message)
+        self.plot_button.setText("Plot relationships")
         self.plot_button.setEnabled(enabled)
         self.reset_button.setEnabled(enabled)
         self._sync_advanced_buttons(enabled)
@@ -280,6 +292,18 @@ class ScatterView(QWidget):
 
     def set_feedback(self, text: str) -> None:
         self.local_status.setText(text)
+
+    def mark_current_result(self) -> None:
+        self.panel.mark_current()
+        if self.panel.has_figure:
+            self.plot_button.setText("Update plot")
+
+    def mark_previous_result(self) -> None:
+        self.panel.mark_previous_result()
+        self.plot_button.setText("Update plot")
+
+    def mark_result_cleared(self) -> None:
+        self.plot_button.setText("Plot relationships")
 
     def open_style_dialog(self) -> ScatterStyleDialog | None:
         if not self.style_button.isEnabled():
@@ -436,6 +460,9 @@ class ScatterView(QWidget):
 
     def _mark_plot_settings_changed(self, message: str) -> None:
         self._plot_settings_revision += 1
+        if self.panel.has_figure:
+            self.panel.mark_changes_not_applied()
+            self.plot_button.setText("Update plot")
         self.set_feedback(message)
         self.settings_updated.emit(message)
 
