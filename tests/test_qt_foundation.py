@@ -1296,11 +1296,11 @@ builtins.__import__ = guarded
         extras = metadata["project"]["optional-dependencies"]
 
         self.assertTrue(any(item.startswith("PySide6>=6.11.3,<6.13") for item in base_dependencies))
-        self.assertFalse(any(item.lower().startswith("customtkinter") for item in base_dependencies))
-        self.assertEqual(extras["qt"], [])
-        self.assertTrue(
-            any(item.startswith("customtkinter>=5.2,<6") for item in extras["legacy"])
+        self.assertFalse(
+            any(item.lower().startswith("customtkinter") for item in base_dependencies)
         )
+        self.assertEqual(extras["qt"], [])
+        self.assertTrue(any(item.startswith("customtkinter>=5.2,<6") for item in extras["legacy"]))
 
     def test_qt_package_and_bootstrap_import_without_pyside6(self):
         self.run_guarded_import(
