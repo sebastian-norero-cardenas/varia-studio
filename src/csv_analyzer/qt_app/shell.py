@@ -34,6 +34,13 @@ class ElidedLabel(QLabel):
     def full_text(self) -> str:
         return self._full_text
 
+    def text(self) -> str:
+        """Return the logical full text while QLabel still paints the elided form."""
+        return self._full_text
+
+    def displayed_text(self) -> str:
+        return super().text()
+
     def set_full_text(self, text: str) -> None:
         self._full_text = str(text)
         self.setToolTip(self._full_text)
