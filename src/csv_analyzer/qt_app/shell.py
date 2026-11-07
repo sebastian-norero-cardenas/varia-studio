@@ -1,4 +1,4 @@
-"""Qt shell with the F3.B tabular exploration view."""
+"""Canonical Qt shell with productized F5.A UX polish."""
 
 from __future__ import annotations
 
@@ -22,6 +22,38 @@ from .statistics_view import StatisticsView
 from .table_view import TableView
 
 
+class ElidedLabel(QLabel):
+    """Single-line label that preserves full text in its tooltip."""
+
+    def __init__(self, text: str = "", parent=None) -> None:
+        super().__init__("", parent)
+        self._full_text = ""
+        self.set_full_text(text)
+
+    @property
+    def full_text(self) -> str:
+        return self._full_text
+
+    def set_full_text(self, text: str) -> None:
+        self._full_text = str(text)
+        self.setToolTip(self._full_text)
+        self._refresh_elision()
+
+    def _refresh_elision(self) -> None:
+        width = max(1, self.contentsRect().width())
+        self.setText(
+            self.fontMetrics().elidedText(
+                self._full_text,
+                Qt.TextElideMode.ElideMiddle,
+                width,
+            )
+        )
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._refresh_elision()
+
+
 class QtShell(QMainWindow):
     open_requested = Signal()
     reload_requested = Signal()
@@ -37,18 +69,25 @@ class QtShell(QMainWindow):
         self._notices: tuple[str, ...] = ()
         self.setWindowTitle("Varia Studio")
         self.resize(1100, 700)
+        self.setMinimumSize(900, 600)
 
         root = QWidget(self)
         layout = QVBoxLayout(root)
+
         title = QLabel("Varia Studio")
         title.setObjectName("title")
         layout.addWidget(title)
 
-        self.dataset_label = QLabel("No dataset loaded")
+        dataset_row = QHBoxLayout()
+        self.dataset_label = ElidedLabel("No dataset loaded", root)
         self.dataset_label.setObjectName("dataset")
-        layout.addWidget(self.dataset_label)
+        dataset_row.addWidget(self.dataset_label, 2)
+        self.dataset_metrics_label = QLabel("", root)
+        self.dataset_metrics_label.setObjectName("dataset-metrics")
+        dataset_row.addWidget(self.dataset_metrics_label, 3)
+        layout.addLayout(dataset_row)
 
-        self.status_label = QLabel("Ready")
+        self.status_label = ElidedLabel("Ready", root)
         self.status_label.setObjectName("status")
         layout.addWidget(self.status_label)
 
@@ -73,7 +112,8 @@ class QtShell(QMainWindow):
         )
         actions.addWidget(self.import_options_button)
 
-        self.cancel_button = QPushButton("Cancel")
+        self.cancel_button = QPushButton("Cancel tasks")
+        self.cancel_button.setToolTip("Cancels all running operations")
         self.cancel_button.setEnabled(False)
         self.cancel_button.clicked.connect(lambda _checked=False: self.cancel_requested.emit())
         actions.addWidget(self.cancel_button)
@@ -101,20 +141,28 @@ class QtShell(QMainWindow):
         self.reload_action.triggered.connect(lambda _checked=False: self.reload_requested.emit())
         self.addAction(self.reload_action)
 
+        self.find_action = QAction("Find in Data", self)
+        self.find_action.setShortcut(QKeySequence.StandardKey.Find)
+        self.find_action.setShortcutContext(Qt.ShortcutContext.WindowShortcut)
+        self.find_action.triggered.connect(self.focus_data_search)
+        self.addAction(self.find_action)
+
         self.tabs = QTabWidget(self)
         self.data_tab = QWidget(self.tabs)
         data_layout = QVBoxLayout(self.data_tab)
         data_layout.setContentsMargins(0, 0, 0, 0)
 
-        notices_row = QHBoxLayout()
-        self.notices_label = QLabel("No import notices")
+        self.notices_widget = QWidget(self.data_tab)
+        notices_row = QHBoxLayout(self.notices_widget)
+        notices_row.setContentsMargins(0, 0, 0, 0)
+        self.notices_label = QLabel("", self.notices_widget)
         self.notices_label.setWordWrap(True)
         notices_row.addWidget(self.notices_label, 1)
-        self.notices_button = QPushButton("Import notices…")
-        self.notices_button.setEnabled(False)
+        self.notices_button = QPushButton("Import notices…", self.notices_widget)
         self.notices_button.clicked.connect(self.show_import_notices)
         notices_row.addWidget(self.notices_button)
-        data_layout.addLayout(notices_row)
+        self.notices_widget.hide()
+        data_layout.addWidget(self.notices_widget)
 
         self.table_view = TableView(self.data_tab)
         data_layout.addWidget(self.table_view)
@@ -145,15 +193,17 @@ class QtShell(QMainWindow):
     ) -> None:
         self._has_dataset = name is not None
         if name is None:
-            self.dataset_label.setText("No dataset loaded")
+            self.dataset_label.set_full_text("No dataset loaded")
+            self.dataset_metrics_label.clear()
             self._notices = ()
-            self.notices_label.setText("No import notices")
-            self.notices_button.setEnabled(False)
+            self.notices_label.clear()
+            self.notices_widget.hide()
         else:
             selected = rows if selected is None else selected
-            self.dataset_label.setText(
-                f"{name} · {rows:,} rows · {columns} columns · "
-                f"{missing:,} missing · {infinite:,} infinite · {selected:,} selected"
+            self.dataset_label.set_full_text(name)
+            self.dataset_metrics_label.setText(
+                f"{rows:,} rows · {columns} columns · {missing:,} missing · "
+                f"{infinite:,} infinite · {selected:,} selected"
             )
             self._notices = tuple(notices)
             if self._notices:
@@ -161,16 +211,16 @@ class QtShell(QMainWindow):
                 self.notices_label.setText(
                     f"{count} import notice{'s' if count != 1 else ''} available"
                 )
-                self.notices_button.setEnabled(True)
+                self.notices_widget.show()
             else:
-                self.notices_label.setText("No import notices")
-                self.notices_button.setEnabled(False)
+                self.notices_label.clear()
+                self.notices_widget.hide()
         idle = self._logical_activity == 0
         self.reload_button.setEnabled(self._has_dataset and idle)
         self.reload_action.setEnabled(self._has_dataset and idle)
 
     def set_status(self, text: str) -> None:
-        self.status_label.setText(text if len(text) <= 180 else text[:177] + "…")
+        self.status_label.set_full_text(text)
 
     def set_activity(self, logical: int, physical: int) -> None:
         self._logical_activity = logical
@@ -182,6 +232,10 @@ class QtShell(QMainWindow):
         self.open_action.setEnabled(idle)
         self.reload_button.setEnabled(self._has_dataset and idle)
         self.reload_action.setEnabled(self._has_dataset and idle)
+
+    def focus_data_search(self) -> None:
+        self.tabs.setCurrentWidget(self.data_tab)
+        self.table_view.focus_search()
 
     def show_import_notices(self) -> None:
         if not self._notices:
@@ -198,7 +252,8 @@ class QtShell(QMainWindow):
             "Statistics\n"
             "Export\n\n"
             "Ctrl+O — Open\n"
-            "Ctrl+R — Reload",
+            "Ctrl+R — Reload\n"
+            "Ctrl+F — Find in Data",
         )
 
     def show_error(self, text: str) -> None:
@@ -209,6 +264,7 @@ class QtShell(QMainWindow):
         self.open_action.setEnabled(False)
         self.reload_button.setEnabled(False)
         self.reload_action.setEnabled(False)
+        self.find_action.setEnabled(False)
         self.import_options_button.setEnabled(False)
         self.guide_button.setEnabled(False)
         self.cancel_button.setEnabled(False)
@@ -223,10 +279,6 @@ class QtShell(QMainWindow):
         if self._allow_close:
             return
         self._allow_close = True
-        # close_requested is emitted synchronously from closeEvent(). Queue the
-        # definitive QWidget.close() until that ignored event has fully unwound.
-        # Using the QObject as receiver avoids retaining a Python callback after
-        # the shell itself has been destroyed.
         QMetaObject.invokeMethod(self, "close", Qt.ConnectionType.QueuedConnection)
 
     def closeEvent(self, event) -> None:
