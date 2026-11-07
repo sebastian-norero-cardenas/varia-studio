@@ -323,7 +323,9 @@ class UxProductizationTests(unittest.TestCase):
             controller.set_scope(TableScope.ALL)
             self.assertEqual(view.feedback_label.text(), "Updating view…")
             pump_until(lambda: coordinator.runner.activity.physical == 0)
-        self.assertIn("Could not update the table view: projection exploded", view.feedback_label.text())
+        self.assertIn(
+            "Could not update the table view: projection exploded", view.feedback_label.text()
+        )
         self.assertEqual(view.scope_combo.currentData(), controller.model.row_map.scope)
 
         with patch(
