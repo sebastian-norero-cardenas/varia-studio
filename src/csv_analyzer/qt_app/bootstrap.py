@@ -1,4 +1,4 @@
-"""Bootstrap and CLI for the independent optional Qt entry point."""
+"""Bootstrap and CLI for the canonical Varia Studio Qt frontend."""
 
 from __future__ import annotations
 
@@ -8,18 +8,19 @@ import sys
 from pathlib import Path
 from typing import Any
 
-QT_EXTRA_MESSAGE = (
-    "PySide6 is required for the Qt interface. Install Varia Studio with the 'qt' extra."
+QT_RUNTIME_MESSAGE = (
+    "PySide6 is required by the Varia Studio desktop application. "
+    "Reinstall Varia Studio in this environment to restore its required dependencies."
 )
 
 
 class QtDependencyError(RuntimeError):
-    """The optional Qt runtime is not installed."""
+    """The required Qt runtime is missing from the current environment."""
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Varia Studio Qt foundation: load and identify a dataset."
+        description="Varia Studio: explore CSV and scientific DAT datasets."
     )
     parser.add_argument("file", nargs="?", type=Path, help="Dataset to open at startup")
     parser.add_argument("--debug", action="store_true", help="Log diagnostic details to stderr")
@@ -35,7 +36,7 @@ def _load_qt_components() -> tuple[type[Any], type[Any], type[Any]]:
     except ModuleNotFoundError as error:
         missing = error.name or ""
         if missing == "PySide6" or missing.startswith("PySide6.") or missing == "shiboken6":
-            raise QtDependencyError(QT_EXTRA_MESSAGE) from None
+            raise QtDependencyError(QT_RUNTIME_MESSAGE) from None
         raise
     return QApplication, QtCoordinator, QtShell
 
