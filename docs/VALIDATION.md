@@ -1,5 +1,32 @@
 # Verification record
 
+## F4.D — Qt canonical cutover candidate gates
+
+F4.D changes packaging/routing only; it does not add scientific functionality,
+remove the legacy CTk source, change the version, or perform a release.
+
+The candidate gate verifies:
+
+- all public launchers route to Qt and preserve `[file]`, `--debug`, and
+  `--help`;
+- a clean wheel install includes PySide6 and excludes CustomTkinter;
+- `[legacy]` installs CustomTkinter and can import the retained legacy module;
+- installed Qt runtime works from outside the repository with `PYTHONPATH`
+  unset;
+- launch/load/Scatter/Histogram/Statistics shutdown scenarios reach
+  `Lifecycle.CLOSED`;
+- pending load/Scatter/Histogram/Statistics shutdown scenarios wait for physical
+  ownership to drain without stale publication;
+- subprocess stress uses independent processes and records exit codes, timeouts
+  and crash strings;
+- focal Qt and retained legacy regressions remain green.
+
+Physical Ubuntu/X11 validation remains mandatory before integration of the
+cutover candidate. Passing F4.D may establish
+`CUTOVER_TEARDOWN_GATE = PASS`, but does not change
+`F3A-SIGSEGV-CI = INDETERMINATE`.
+
+
 ## F3.A Qt Foundation — final integration evidence
 
 Date: 2026-11-03.
