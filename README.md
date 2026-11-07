@@ -1,18 +1,20 @@
 # Varia Studio
 
-Varia Studio is a desktop workspace for inspecting CSV/DAT datasets, exploring relationships and
-distributions, and computing descriptive statistics. Python, CustomTkinter,
-pandas, NumPy, and Matplotlib; no web service or account required.
+Varia Studio is a local-first desktop workspace for inspecting CSV/DAT datasets, exploring
+relationships and distributions, and computing descriptive statistics. The canonical desktop
+frontend uses PySide6/Qt with pandas, NumPy, and Matplotlib; no web service or account is required.
 
 ## Install and launch
 
-Python **3.10 or newer**, Tk, and a graphical desktop are required. The verified
-environment is Python 3.12 on Linux. Windows and macOS have not been runtime-tested.
+Python **3.10 or newer** and a graphical desktop are required. PySide6/Qt is a
+normal application dependency and is installed by the standard package install.
+The verified CI environments are Python 3.10 and 3.12 on Linux; Windows and
+macOS are not certified by the current release process.
 
-On Ubuntu, install Tk and virtual environment support if needed:
+On Ubuntu, install virtual-environment support if needed:
 
 ```bash
-sudo apt install python3-tk python3-venv
+sudo apt install python3-venv
 ```
 
 From this project directory:
@@ -24,17 +26,36 @@ python -m pip install .
 varia-studio
 ```
 
-On Windows, use `py -m venv .venv` and `.venv\Scripts\activate` instead.
-The historical `csv-analyzer` command remains available as a legacy compatibility
-alias. The technical module entry point `python -m csv_analyzer` also remains
-supported. A file may be opened at startup:
+The following launchers are compatibility aliases for the same canonical Qt
+frontend:
+
+```bash
+varia-studio
+csv-analyzer
+varia-studio-qt
+python -m csv_analyzer
+```
+
+All accept an optional dataset path and `--debug`, for example:
 
 ```bash
 varia-studio examples/scientific_demo.csv
+python -m csv_analyzer examples/scientific_demo.csv
 ```
 
-The installed distribution is intentionally still named `csv-analyzer-desktop`
-and the Python namespace remains `csv_analyzer` for compatibility.
+The installed distribution remains named `csv-analyzer-desktop` and the Python
+namespace remains `csv_analyzer` for compatibility.
+
+The previous CustomTkinter implementation is retained temporarily for regression
+and compatibility work, but it is no longer the canonical application and is not
+installed by default. Install it only when legacy tests or code require it:
+
+```bash
+python -m pip install '.[legacy]'
+```
+
+The historical `[qt]` extra remains accepted as a no-op compatibility alias;
+Qt itself is already a base dependency.
 
 For the exact tested Python 3.12 dependency snapshot, install with
 `python -m pip install -c constraints-python312.txt .`. Other Python versions
@@ -140,7 +161,7 @@ These are descriptive statistics, not significance tests or fitted models.
 ## Performance and responsiveness
 
 File validation/parsing, filtering, plot-array preparation and statistics run in
-workers. Tk widgets and Matplotlib rendering stay on the main thread. There is one
+workers. Qt widgets and Matplotlib rendering stay on the GUI thread. There is one
 committed dataframe, a small selection mask, and only the per-analysis arrays that
 are needed. Preview tables hold at most 200 data rows. A replacement temporarily
 needs memory for both the old dataset and the candidate so failure remains atomic.
@@ -156,7 +177,7 @@ leave the Python process alive until that parse completes.
 ## Development and verification
 
 ```bash
-python -m pip install -e '.[dev]'
+python -m pip install -e '.[dev,legacy]'
 python -m unittest discover -s tests -v
 python -m ruff check src tests tools
 python -m ruff format --check src tests tools
@@ -165,7 +186,7 @@ python -m build
 
 The normal suite includes desktop integration tests. On Linux without `DISPLAY`,
 those two tests are explicitly skipped; other tests use Agg for real figure
-rendering. On a system with Xvfb and Tk installed:
+rendering. On a Linux system with Xvfb available:
 
 ```bash
 xvfb-run -a python -m unittest discover -s tests -v
@@ -190,9 +211,9 @@ included for routine verification. `--debug` enables diagnostic logging.
 | `src/csv_analyzer/analysis.py` | Pure numerical selection/statistics |
 | `src/csv_analyzer/plots.py` | Validated plot specifications, arrays and figures |
 | `src/csv_analyzer/exports.py` | Atomic output writing |
-| `src/csv_analyzer/jobs.py` | Cancellable workers and main-thread delivery |
-| `src/csv_analyzer/app.py` | Application coordination and CLI entry point |
-| `src/csv_analyzer/ui/` | Four tabs, main window, dialogs and shared widgets |
+| `src/csv_analyzer/qt_app/` | Canonical PySide6 shell, controllers, task scheduler and views |
+| `src/csv_analyzer/app.py` | Retained non-canonical CustomTkinter application |
+| `src/csv_analyzer/ui/` | Retained legacy CustomTkinter views and dialogs |
 | `tests/`, `examples/`, `tools/` | Regression/integration tests, small fixtures and benchmark |
 | `docs/` | Architecture, migration notes and verification evidence |
 
