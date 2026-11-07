@@ -1,0 +1,302 @@
+name: F4.C Qt plot coherence
+
+on:
+  push:
+    branches:
+      - feat/f4-c-qt-plot-coherence
+
+permissions:
+  contents: read
+
+jobs:
+  focal-python:
+    name: F4.C focal / Python ${{ matrix.python-version }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12"]
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONFAULTHANDLER: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Ubuntu Qt runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libegl1 libgl1 libopengl0 libfontconfig1 \
+            libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 \
+            libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 \
+            libxcb-util1 libxcb-xinerama0 libxcb-xkb1
+
+      - name: Install focal environment
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python -m pip install --upgrade pip
+          if [ "${{ matrix.python-version }}" = "3.12" ]; then
+            python -m pip install -c constraints-python312.txt -e '.[dev,qt]'
+          else
+            python -m pip install -e '.[dev,qt]'
+          fi
+
+      - name: F4.C focal
+        run: python -m unittest -v tests.test_qt_plot_configuration
+
+  verify:
+    name: F4.C regressions / build / installed smoke
+    needs: focal-python
+    runs-on: ubuntu-22.04
+    timeout-minutes: 75
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONFAULTHANDLER: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify baseline ancestry
+        run: |
+          set -euxo pipefail
+          test "$(git merge-base HEAD 4c16a3258aef594363e5e338a1bad1362b37c32f)" = \
+            "4c16a3258aef594363e5e338a1bad1362b37c32f"
+          test -z "$(git status --porcelain)"
+          git rev-parse HEAD
+          git rev-parse HEAD^{tree}
+
+      - name: Install Ubuntu GUI runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            xvfb python3-tk libegl1 libgl1 libopengl0 libfontconfig1 \
+            libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 \
+            libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 \
+            libxcb-util1 libxcb-xinerama0 libxcb-xkb1
+
+      - name: Install development environment
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -c constraints-python312.txt -e '.[dev,qt]'
+
+      - name: F4.C focal
+        run: python -m unittest -v tests.test_qt_plot_configuration 2>&1 | tee /tmp/f4c-tests.txt
+
+      - name: F4.B Scatter advanced regression
+        run: |
+          python -m unittest -v \
+            tests.test_qt_scatter_advanced.ScatterAdvancedTests \
+            2>&1 | tee /tmp/f4b-regression.txt
+
+      - name: F3.D Scatter focal regression
+        run: |
+          python -m unittest -v \
+            tests.test_qt_scatter.QtScatterTests.test_prepare_render_and_draw_failures_preserve_previous_figure \
+            tests.test_qt_scatter.QtScatterTests.test_pending_draw_idle_is_neutralized_before_canvas_detaches \
+            tests.test_qt_scatter.QtScatterTests.test_latest_request_wins \
+            tests.test_qt_scatter.QtScatterTests.test_selection_change_cancels_pending_and_clears_figure
+
+      - name: F3.E Histogram focal regression
+        run: |
+          python -m unittest -v \
+            tests.test_qt_histogram.QtHistogramTests.test_spec_mapping_custom_bins_and_invalid_custom_preserves_figure_without_worker \
+            tests.test_qt_histogram.QtHistogramTests.test_prepare_render_and_draw_failures_preserve_previous_figure \
+            tests.test_qt_histogram.QtHistogramTests.test_latest_histogram_request_wins \
+            tests.test_qt_histogram.QtHistogramTests.test_filter_change_cancels_pending_and_clears_figure
+
+      - name: F3.G export smoke
+        run: |
+          python -m unittest -v \
+            tests.test_qt_exporting.QtExportTests.test_figure_button_state_and_current_figure_replacement \
+            tests.test_qt_exporting.QtExportTests.test_figure_png_pdf_svg_and_dpi_values \
+            tests.test_qt_exporting.QtExportTests.test_stale_figure_dialog_guard_prevents_export
+
+      - name: F4.A Open/Reload smoke
+        run: |
+          python -m unittest -v \
+            tests.test_qt_import_shell.QtImportShellTests.test_open_success_activates_data_tab_from_statistics \
+            tests.test_qt_import_shell.QtImportShellTests.test_reload_success_and_generic_load_preserve_statistics_tab
+
+      - name: Filter invalidation smoke
+        run: |
+          python -m unittest -v \
+            tests.test_qt_filters.QtFilterTests.test_apply_rules_and_clear_commit_revisions_and_zero_selected
+
+      - name: PlotPanel lifecycle smoke
+        run: |
+          python -m unittest -v \
+            tests.test_qt_scatter.QtScatterTests.test_prepare_render_and_draw_failures_preserve_previous_figure \
+            tests.test_qt_histogram.QtHistogramTests.test_pending_draw_idle_is_neutralized_before_canvas_detaches
+
+      - name: Ruff focal
+        run: |
+          python -m ruff check \
+            src/csv_analyzer/qt_app/scatter_view.py \
+            src/csv_analyzer/qt_app/scatter_controller.py \
+            src/csv_analyzer/qt_app/histogram_view.py \
+            src/csv_analyzer/qt_app/histogram_controller.py \
+            tests/test_qt_plot_configuration.py
+          python -m ruff format --check \
+            src/csv_analyzer/qt_app/scatter_view.py \
+            src/csv_analyzer/qt_app/scatter_controller.py \
+            src/csv_analyzer/qt_app/histogram_view.py \
+            src/csv_analyzer/qt_app/histogram_controller.py \
+            tests/test_qt_plot_configuration.py
+
+      - name: Build wheel and sdist
+        run: |
+          mkdir -p dist
+          python -m build
+          sha256sum dist/* | tee dist/SHA256SUMS
+
+      - name: Clean base install without Qt extra
+        shell: bash
+        run: |
+          set -euxo pipefail
+          WHEEL="$(readlink -f "$(ls dist/*.whl)")"
+          python -m venv /tmp/varia-f4c-base
+          /tmp/varia-f4c-base/bin/python -m pip install --upgrade pip
+          /tmp/varia-f4c-base/bin/pip install \
+            -c "$GITHUB_WORKSPACE/constraints-python312.txt" "$WHEEL"
+          /tmp/varia-f4c-base/bin/pip check
+          /tmp/varia-f4c-base/bin/python - <<'PY' | tee dist/base-environment.txt
+          import importlib.util
+          assert importlib.util.find_spec("PySide6") is None
+          from csv_analyzer.plots import HistogramSpec, ScatterSpec
+          print("base_pyside6=ABSENT")
+          print("plot_core_import=PASS")
+          print(ScatterSpec("x", "y"))
+          print(HistogramSpec("x"))
+          PY
+
+      - name: Clean Qt install from same wheel
+        shell: bash
+        run: |
+          set -euxo pipefail
+          WHEEL="$(readlink -f "$(ls dist/*.whl)")"
+          python -m venv /tmp/varia-f4c-qt
+          /tmp/varia-f4c-qt/bin/python -m pip install --upgrade pip
+          /tmp/varia-f4c-qt/bin/pip install \
+            -c "$GITHUB_WORKSPACE/constraints-python312.txt" "${WHEEL}[qt]"
+          /tmp/varia-f4c-qt/bin/pip check
+
+      - name: Installed Qt plot-coherence smoke
+        shell: bash
+        run: |
+          mkdir -p /tmp/varia-f4c-runtime
+          cd /tmp/varia-f4c-runtime
+          cat > plots.csv <<'EOF'
+          x,y,z,c
+          1,2,3,10
+          2,4,6,20
+          3,6,9,30
+          4,8,12,40
+          EOF
+          env -u PYTHONPATH QT_QPA_PLATFORM=offscreen \
+            /tmp/varia-f4c-qt/bin/python - <<'PY' | tee "$GITHUB_WORKSPACE/dist/qt-plot-coherence-smoke.txt"
+          from pathlib import Path
+          from unittest.mock import patch
+          from PySide6.QtCore import QEventLoop, QTimer
+          from csv_analyzer.qt_app.bootstrap import create_application
+          from csv_analyzer.qt_app.coordinator import Lifecycle
+
+          def pump(predicate):
+              if predicate():
+                  return
+              loop = QEventLoop()
+              timer = QTimer()
+              timer.setInterval(2)
+              timer.timeout.connect(lambda: loop.quit() if predicate() else None)
+              timer.start()
+              QTimer.singleShot(6000, loop.quit)
+              loop.exec()
+              assert predicate()
+
+          app, coordinator, shell = create_application()
+          coordinator.start()
+          shell.show()
+          coordinator.load_path(Path("plots.csv"))
+          pump(lambda: coordinator.runner.activity.physical == 0)
+
+          scatter = shell.scatter_view
+          coordinator.scatter_controller.request_plot()
+          pump(lambda: coordinator.runner.activity.physical == 0)
+          scatter_a = scatter.panel.figure
+          index = scatter.x_axis.column.findText("z")
+          scatter.x_axis.column.setCurrentIndex(index)
+          scatter.x_axis.column.activated.emit(index)
+          assert scatter.panel.figure is scatter_a
+          assert "Plot again" in scatter.local_status.text()
+          assert "Plot again" in shell.status_label.text()
+          coordinator.scatter_controller.request_plot()
+          pump(lambda: coordinator.runner.activity.physical == 0)
+          assert coordinator.scatter_controller.current_spec.x == "z"
+          assert shell.status_label.text() == "Relationship figure updated."
+
+          histogram = shell.histogram_view
+          histogram.title.setText("Distribution smoke")
+          histogram.title.textEdited.emit("Distribution smoke")
+          coordinator.histogram_controller.request_plot()
+          pump(lambda: coordinator.runner.activity.physical == 0)
+          assert histogram.panel.figure.axes[0].get_title(loc="left") == "Distribution smoke"
+          hist_a = histogram.panel.figure
+          histogram.title.setText("Distribution B")
+          histogram.title.textEdited.emit("Distribution B")
+          assert histogram.panel.figure is hist_a
+          assert "Plot again" in histogram.local_status.text()
+
+          with patch(
+              "csv_analyzer.qt_app.plot_panel.choose_save_path",
+              return_value=Path("distribution.png"),
+          ):
+              histogram.panel.export_current_figure()
+          assert Path("distribution.png").exists()
+
+          coordinator.histogram_controller.request_plot()
+          pump(lambda: coordinator.runner.activity.physical == 0)
+          assert histogram.panel.figure.axes[0].get_title(loc="left") == "Distribution B"
+          coordinator.histogram_controller.reset_settings()
+          assert not histogram.panel.has_figure
+          assert histogram.title.text() == ""
+
+          shell.close()
+          pump(lambda: coordinator.lifecycle is Lifecycle.CLOSED and not shell.isVisible())
+          print("qt_plot_coherence_smoke=PASS")
+          print("qt_lifecycle=CLOSED")
+          PY
+
+      - name: Record evidence
+        run: |
+          cp /tmp/f4c-tests.txt dist/f4c-tests.txt
+          cp /tmp/f4b-regression.txt dist/f4b-regression.txt
+          {
+            echo "commit=$(git rev-parse HEAD)"
+            echo "tree=$(git rev-parse HEAD^{tree})"
+            echo "baseline=4c16a3258aef594363e5e338a1bad1362b37c32f"
+            echo "python=$(python --version 2>&1)"
+            echo "pyside6=$(python -c 'import PySide6; print(PySide6.__version__)')"
+            echo "pandas=$(python -c 'import pandas; print(pandas.__version__)')"
+            echo "f4c_tests_bytes=$(wc -c < /tmp/f4c-tests.txt)"
+            echo "f4b_regression_bytes=$(wc -c < /tmp/f4b-regression.txt)"
+          } | tee dist/f4c-environment.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: f4-c-evidence
+          path: dist/*
+          if-no-files-found: error
