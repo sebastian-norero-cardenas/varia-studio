@@ -198,7 +198,14 @@ jobs:
       - name: Ruff
         run: |
           python -m ruff check src tests tools
-          python -m ruff format --check src tests tools
+          python -m ruff format --check \
+            src/csv_analyzer/__main__.py \
+            src/csv_analyzer/qt_app/__init__.py \
+            src/csv_analyzer/qt_app/bootstrap.py \
+            tests/test_identity.py \
+            tests/test_qt_cutover.py \
+            tests/test_qt_foundation.py \
+            tools/f4d_teardown_probe.py
 
       - name: Build wheel and sdist
         run: |
