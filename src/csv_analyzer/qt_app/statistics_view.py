@@ -56,6 +56,7 @@ class StatisticsView(QWidget):
         self.ddof.addItem("Population (N)", 0)
         self.ddof.currentIndexChanged.connect(self._settings_changed)
         form.addRow("Convention", self.ddof)
+        self.ddof_label = form.labelForField(self.ddof)
 
         columns_row = QWidget(controls)
         columns_layout = QHBoxLayout(columns_row)
@@ -67,6 +68,8 @@ class StatisticsView(QWidget):
         self.columns_label.setWordWrap(True)
         columns_layout.addWidget(self.columns_label, 1)
         form.addRow("Correlation", columns_row)
+        self.correlation_row = columns_row
+        self.correlation_label = form.labelForField(columns_row)
 
         actions_row = QWidget(controls)
         actions_layout = QHBoxLayout(actions_row)
@@ -196,8 +199,15 @@ class StatisticsView(QWidget):
             if dataset is not None
             else ()
         )
-        self.ddof.setEnabled(mode == "numeric")
-        self.columns_button.setEnabled(mode == "correlation" and len(numeric) >= 2)
+        numeric_mode = mode == "numeric"
+        correlation_mode = mode == "correlation"
+        self.ddof.setVisible(numeric_mode)
+        if self.ddof_label is not None:
+            self.ddof_label.setVisible(numeric_mode)
+        self.correlation_row.setVisible(correlation_mode)
+        if self.correlation_label is not None:
+            self.correlation_label.setVisible(correlation_mode)
+        self.columns_button.setEnabled(correlation_mode and len(numeric) >= 2)
 
         enabled = False
         if dataset is not None:
