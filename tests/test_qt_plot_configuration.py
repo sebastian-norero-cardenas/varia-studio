@@ -265,8 +265,9 @@ class PlotConfigurationTests(unittest.TestCase):
         with (
             patch(
                 "csv_analyzer.qt_app.plot_panel.export_figure",
-                side_effect=lambda value, path, **_kwargs: exported.append((value, Path(path)))
-                or Path(path),
+                side_effect=lambda value, path, **_kwargs: (
+                    exported.append((value, Path(path))) or Path(path)
+                ),
             ),
             patch(
                 "csv_analyzer.qt_app.plot_panel.choose_save_path",
