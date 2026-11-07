@@ -96,6 +96,7 @@ class ScatterView(QWidget):
         self._dataset: Dataset | None = None
         self._settings_epoch = 0
         self._advanced_revision = 0
+        self._plot_settings_revision = 0
         self._style_dialog: ScatterStyleDialog | None = None
         self._overlay_dialog: ScatterOverlayDialog | None = None
         self._inset_dialog: ScatterInsetDialog | None = None
@@ -173,6 +174,7 @@ class ScatterView(QWidget):
         outer.addWidget(self.panel, 1)
         self._sync_color_controls()
         self._sync_advanced_buttons(False)
+        self._connect_plot_setting_signals()
 
     @property
     def settings_epoch(self) -> int:
@@ -181,6 +183,10 @@ class ScatterView(QWidget):
     @property
     def advanced_revision(self) -> int:
         return self._advanced_revision
+
+    @property
+    def plot_settings_revision(self) -> int:
+        return self._plot_settings_revision
 
     def set_dataset(self, dataset: Dataset | None) -> None:
         self._dataset = dataset
@@ -193,6 +199,7 @@ class ScatterView(QWidget):
         self.close_advanced_dialogs()
         self._settings_epoch += 1
         self._advanced_revision += 1
+        self._plot_settings_revision += 1
         columns = dataset.numeric_columns if dataset is not None else ()
         x_current = columns[0] if columns else None
         y_current = columns[1] if len(columns) > 1 else (columns[0] if columns else None)
@@ -297,9 +304,7 @@ class ScatterView(QWidget):
             return
         self.style = style
         self._advanced_revision += 1
-        message = "Appearance updated. Plot again to apply it."
-        self.set_feedback(message)
-        self.settings_updated.emit(message)
+        self._mark_plot_settings_changed("Appearance updated. Plot again to apply it.")
 
     def _clear_style_dialog(self, dialog: ScatterStyleDialog) -> None:
         if self._style_dialog is dialog:
@@ -329,9 +334,7 @@ class ScatterView(QWidget):
         self.overlays = overlays
         self._advanced_revision += 1
         self.overlay_button.setText(f"Annotations · {len(overlays)}")
-        message = "Annotations updated. Plot again to apply them."
-        self.set_feedback(message)
-        self.settings_updated.emit(message)
+        self._mark_plot_settings_changed("Annotations updated. Plot again to apply them.")
 
     def _clear_overlay_dialog(self, dialog: ScatterOverlayDialog) -> None:
         if self._overlay_dialog is dialog:
@@ -368,9 +371,7 @@ class ScatterView(QWidget):
         self.inset = inset
         self._advanced_revision += 1
         self.inset_button.setText(f"Inset zoom · {'on' if inset is not None else 'off'}")
-        message = "Inset updated. Plot again to apply it."
-        self.set_feedback(message)
-        self.settings_updated.emit(message)
+        self._mark_plot_settings_changed("Inset updated. Plot again to apply it.")
 
     def _clear_inset_dialog(self, dialog: ScatterInsetDialog) -> None:
         if self._inset_dialog is dialog:
@@ -394,6 +395,49 @@ class ScatterView(QWidget):
         self._style_dialog = None
         self._overlay_dialog = None
         self._inset_dialog = None
+
+    def _connect_plot_setting_signals(self) -> None:
+        combos = (
+            self.x_axis.column,
+            self.x_axis.scale,
+            self.y_axis.column,
+            self.y_axis.scale,
+            self.color,
+            self.color_scale,
+        )
+        for combo in combos:
+            combo.activated.connect(self._base_plot_setting_changed)
+
+        checks = (
+            self.x_axis.absolute,
+            self.x_axis.scientific,
+            self.y_axis.absolute,
+            self.y_axis.scientific,
+            self.color_absolute,
+            self.color_scientific,
+            self.show_excluded,
+        )
+        for checkbox in checks:
+            checkbox.clicked.connect(self._base_plot_setting_changed)
+
+        edits = (
+            self.x_axis.minimum,
+            self.x_axis.maximum,
+            self.y_axis.minimum,
+            self.y_axis.maximum,
+        )
+        for edit in edits:
+            edit.textEdited.connect(self._base_plot_setting_changed)
+
+    def _base_plot_setting_changed(self, *_args) -> None:
+        if self._dataset is None:
+            return
+        self._mark_plot_settings_changed("Settings changed. Plot again to apply them.")
+
+    def _mark_plot_settings_changed(self, message: str) -> None:
+        self._plot_settings_revision += 1
+        self.set_feedback(message)
+        self.settings_updated.emit(message)
 
     def _sync_color_controls(self) -> None:
         enabled = self.color.currentData() is not None
