@@ -1,9 +1,10 @@
 # Exact versions verified on CPython 3.12 / Linux x86_64.
 # Optional reproducibility snapshot; use pyproject.toml on other Python versions.
-# Qt pins below constrain environments installed with the [qt] extra; they do
-# not make PySide6 a base dependency.
-# Base: python -m pip install -c constraints-python312.txt .
-# Qt:   python -m pip install -c constraints-python312.txt '.[qt]'
+# PySide6 is a canonical/base dependency. CustomTkinter is retained only by the
+# optional [legacy] extra.
+# Canonical: python -m pip install -c constraints-python312.txt .
+# Compatible Qt extra alias: python -m pip install -c constraints-python312.txt '.[qt]'
+# Legacy regression environment: python -m pip install -c constraints-python312.txt '.[legacy]'
 contourpy==1.3.3
 customtkinter==5.2.2
 cycler==0.12.1
