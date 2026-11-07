@@ -7,7 +7,6 @@ import tempfile
 import time
 from pathlib import Path
 
-import pandas as pd
 from PySide6.QtCore import QEventLoop, QTimer
 from PySide6.QtWidgets import QApplication
 
