@@ -109,15 +109,15 @@ jobs:
             tests.test_qt_scatter.QtScatterTests.test_prepare_render_and_draw_failures_preserve_previous_figure \
             tests.test_qt_scatter.QtScatterTests.test_pending_draw_idle_is_neutralized_before_canvas_detaches \
             tests.test_qt_scatter.QtScatterTests.test_latest_request_wins \
-            tests.test_qt_scatter.QtScatterTests.test_selection_change_cancels_pending_and_clears_figure
+            tests.test_qt_scatter.QtScatterTests.test_dataset_and_selection_changes_invalidate_plot_but_failed_load_does_not
 
       - name: F3.E Histogram focal regression
         run: |
           python -m unittest -v \
             tests.test_qt_histogram.QtHistogramTests.test_spec_mapping_custom_bins_and_invalid_custom_preserves_figure_without_worker \
-            tests.test_qt_histogram.QtHistogramTests.test_prepare_render_and_draw_failures_preserve_previous_figure \
+            tests.test_qt_histogram.QtHistogramTests.test_prepare_render_draw_failures_preserve_valid_figure \
             tests.test_qt_histogram.QtHistogramTests.test_latest_histogram_request_wins \
-            tests.test_qt_histogram.QtHistogramTests.test_filter_change_cancels_pending_and_clears_figure
+            tests.test_qt_histogram.QtHistogramTests.test_pending_histogram_is_invalidated_by_selection_revision_change
 
       - name: F3.G export smoke
         run: |
@@ -141,7 +141,7 @@ jobs:
         run: |
           python -m unittest -v \
             tests.test_qt_scatter.QtScatterTests.test_prepare_render_and_draw_failures_preserve_previous_figure \
-            tests.test_qt_histogram.QtHistogramTests.test_pending_draw_idle_is_neutralized_before_canvas_detaches
+            tests.test_qt_histogram.QtHistogramTests.test_repeated_histogram_replacement_and_draw_idle_replot
 
       - name: Ruff focal
         run: |
