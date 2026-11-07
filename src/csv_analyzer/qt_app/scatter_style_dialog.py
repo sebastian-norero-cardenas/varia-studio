@@ -160,9 +160,7 @@ class ScatterStyleDialog(QDialog):
             marker=self.marker.currentText(),
             size=_finite_float(self.size.text(), "Marker area"),
             opacity=_finite_float(self.opacity.text(), "Selected opacity"),
-            excluded_opacity=_finite_float(
-                self.excluded_opacity.text(), "Excluded opacity"
-            ),
+            excluded_opacity=_finite_float(self.excluded_opacity.text(), "Excluded opacity"),
             cmap=self.cmap.currentText(),
             grid=self.grid.isChecked(),
             sample_limit=sample_limit,
