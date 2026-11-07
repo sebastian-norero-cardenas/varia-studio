@@ -81,18 +81,40 @@ class DataFrameTableModel(QAbstractTableModel):
         return None
 
     def headerData(self, section: int, orientation, role=Qt.ItemDataRole.DisplayRole):
-        if role != Qt.ItemDataRole.DisplayRole:
-            return None
         if orientation == Qt.Orientation.Horizontal:
             if section == 0:
-                return "Source Row ID"
+                if role == Qt.ItemDataRole.DisplayRole:
+                    return "Source Row ID"
+                if role == Qt.ItemDataRole.ToolTipRole:
+                    return "Source Row ID\n1-based row position in the committed dataset."
+                return None
             offset = section - 1
-            if 0 <= offset < len(self._columns):
-                return self._columns[offset]
+            if not 0 <= offset < len(self._columns):
+                return None
+            name = self._columns[offset]
+            if role == Qt.ItemDataRole.DisplayRole:
+                return name
+            if role == Qt.ItemDataRole.ToolTipRole and self._dataset is not None:
+                info = next((column for column in self._dataset.columns if column.name == name), None)
+                if info is None:
+                    return name
+                lines = [
+                    name,
+                    f"Kind: {info.kind}",
+                    f"Type: {info.dtype}",
+                    f"Missing: {info.missing:,}",
+                ]
+                if info.kind == "numeric":
+                    lines.append(f"Infinite: {info.infinite:,}")
+                return "\n".join(lines)
             return None
-        if orientation == Qt.Orientation.Vertical and self._row_map is not None:
-            if 0 <= section < len(self._row_map):
-                return str(section + 1)
+        if (
+            role == Qt.ItemDataRole.DisplayRole
+            and orientation == Qt.Orientation.Vertical
+            and self._row_map is not None
+            and 0 <= section < len(self._row_map)
+        ):
+            return str(section + 1)
         return None
 
     def flags(self, index: QModelIndex):
