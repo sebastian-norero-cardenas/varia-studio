@@ -379,7 +379,8 @@ jobs:
             pid=$!
             success=0
             for _ in $(seq 1 240); do
-              if grep -Eq 'event=task_outcome_published .*key=load .*status=SUCCESS' "$log"; then
+              if grep -Eq 'event=task_outcome_published .*key=load .*status=SUCCESS' "$log" \
+                && grep -Eq 'event=task_physical_finished .*key=load' "$log"; then
                 success=1
                 break
               fi
