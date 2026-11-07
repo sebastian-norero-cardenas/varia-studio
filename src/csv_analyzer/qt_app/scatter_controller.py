@@ -98,6 +98,7 @@ class ScatterController(QObject):
 
         self._plot_epoch += 1
         epoch = self._plot_epoch
+        advanced_revision = self.view.advanced_revision
         self.current_spec = spec
         frame = snapshot.dataset.frame
         mask = snapshot.mask
@@ -106,7 +107,7 @@ class ScatterController(QObject):
         token = self._submit_task(
             "scatter",
             lambda cancel: prepare_scatter(frame, spec, mask, cancel=cancel),
-            success=lambda data: self._install_scatter(data, spec, epoch),
+            success=lambda data: self._install_scatter(data, spec, epoch, advanced_revision),
             failure=self._prepare_failure,
             receiver=self,
             exclusive_group="plots",
@@ -114,7 +115,13 @@ class ScatterController(QObject):
         if token is None:
             self.view.panel.error("Scatter preparation could not be scheduled.")
 
-    def _install_scatter(self, data: ScatterData, spec: ScatterSpec, epoch: int) -> None:
+    def _install_scatter(
+        self,
+        data: ScatterData,
+        spec: ScatterSpec,
+        epoch: int,
+        advanced_revision: int,
+    ) -> None:
         if self._closing or epoch != self._plot_epoch or spec != self.current_spec:
             return
         if threading.get_ident() != self._gui_thread_id:
@@ -136,8 +143,15 @@ class ScatterController(QObject):
             len(data.x),
             len(data.excluded_x),
         )
-        self.view.set_feedback(data.description)
-        self._set_status("Relationship figure updated.")
+        if advanced_revision != self.view.advanced_revision:
+            warning = "Figure uses previous settings. Plot again to apply current settings."
+            self.view.set_feedback(f"{data.description}\n{warning}")
+            self._set_status(
+                "Figure updated with previous settings. Plot again to apply current settings."
+            )
+        else:
+            self.view.set_feedback(data.description)
+            self._set_status("Relationship figure updated.")
 
     def _prepare_failure(self, error: BaseException) -> None:
         if isinstance(error, CancelledError):
