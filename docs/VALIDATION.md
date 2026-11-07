@@ -1,29 +1,50 @@
 # Verification record
 
-## F4.D — Qt canonical cutover candidate gates
+## F4.D — Qt canonical cutover final integration evidence
 
-F4.D changes packaging/routing only; it does not add scientific functionality,
-remove the legacy CTk source, change the version, or perform a release.
+Date: 2026-11-07.
 
-The candidate gate verifies:
+The authorized F4.D candidate
+`a4a98653be0fac5732cd329a252de7b80798c6ca`
+(tree `bc435193172319b15517e5597ee02cb170f5dfc5`) was integrated into
+`main` by fast-forward only from production baseline
+`23dcb088a2c987769f89d231790baf0e767397e5`. The candidate itself was
+not modified, squashed, rebased, cherry-picked or merged through a merge commit.
 
-- all public launchers route to Qt and preserve `[file]`, `--debug`, and
-  `--help`;
-- a clean wheel install includes PySide6 and excludes CustomTkinter;
-- `[legacy]` installs CustomTkinter and can import the retained legacy module;
-- installed Qt runtime works from outside the repository with `PYTHONPATH`
-  unset;
-- launch/load/Scatter/Histogram/Statistics shutdown scenarios reach
-  `Lifecycle.CLOSED`;
-- pending load/Scatter/Histogram/Statistics shutdown scenarios wait for physical
-  ownership to drain without stale publication;
-- subprocess stress uses independent processes and records exit codes, timeouts
-  and crash strings;
-- focal Qt and retained legacy regressions remain green.
+Final gate state:
 
-Physical Ubuntu/X11 validation remains mandatory before integration of the
-cutover candidate. Passing F4.D may establish
-`CUTOVER_TEARDOWN_GATE = PASS`, but does not change
+- `QA06B-F4D-01 = VERIFIED`;
+- `CUTOVER_TEARDOWN_GATE = PASS`;
+- `PHYSICAL_F4D_X11 = PASS`;
+- `QT_CUTOVER_READINESS = READY`;
+- `F3A-SIGSEGV-CI = INDETERMINATE`.
+
+The physical validation ran on Ubuntu/X11 with `DISPLAY=:1`,
+`XDG_SESSION_TYPE=x11`, and PySide6 6.12.0. The full manual F4.D flow
+passed. Launching `varia-studio examples/scientific_demo.csv` loaded the
+dataset and closed normally, and immediate close during startup/load also
+completed without crash or hang. The
+`qt.qpa.theme.gnome` / `org.freedesktop.portal.Desktop ... ServiceUnknown`
+messages observed during that session are recorded as non-blocking environment
+noise.
+
+GitHub Actions run `42381322464` (run 7, attempt 1) completed successfully
+on the exact candidate, including Python 3.10/3.12 canonical routing tests,
+packaging metadata, clean canonical wheel install, compatible `[qt]` install,
+clean `[legacy]` install, installed Qt runtime smoke, focal Qt and legacy
+regressions, Ruff, build, and the subprocess teardown campaign. The teardown
+campaign recorded 28 independent processes, zero timeouts, zero failures and
+zero segfault strings.
+
+After this cutover, PySide6/Qt is the canonical frontend for
+`varia-studio`, `csv-analyzer`, `varia-studio-qt`, and
+`python -m csv_analyzer`. The CustomTkinter implementation remains retained
+as an optional legacy implementation through the `[legacy]` extra; its source
+and tests are intentionally preserved.
+
+F4.D does not perform a version bump, tag or release, and does not remove CTk.
+The successful F4.D teardown and physical gates do not retrospectively resolve
+the historical F3.A incident:
 `F3A-SIGSEGV-CI = INDETERMINATE`.
 
 
