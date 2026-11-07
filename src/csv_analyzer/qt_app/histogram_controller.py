@@ -41,6 +41,8 @@ class HistogramController(QObject):
         self.current_spec: HistogramSpec | None = None
         self.current_counts: tuple[int, int, int, int, int] | None = None
         view.plot_requested.connect(self.request_plot)
+        view.reset_requested.connect(self.reset_settings)
+        view.settings_updated.connect(self._settings_updated)
 
     def handle_state_change(self, reason: str, snapshot: StateSnapshot) -> None:
         dataset_changed = snapshot.dataset_revision != self._dataset_revision
@@ -63,6 +65,24 @@ class HistogramController(QObject):
             self.view.set_feedback("Selection changed. Plot again to use the current filters.")
 
     @Slot()
+    def reset_settings(self) -> None:
+        if self._closing:
+            return
+        self._invalidate_pending()
+        self.current_spec = None
+        self.current_counts = None
+        self.view.reset_settings()
+        self.view.panel.clear("Settings reset. Plot again.")
+        self.view.set_feedback("Settings reset. Plot again.")
+        self._set_status("Settings reset. Plot again.")
+
+    @Slot(str)
+    def _settings_updated(self, message: str) -> None:
+        if self._closing:
+            return
+        self._set_status(message)
+
+    @Slot()
     def request_plot(self) -> None:
         if self._closing:
             return
@@ -78,6 +98,7 @@ class HistogramController(QObject):
 
         self._plot_epoch += 1
         epoch = self._plot_epoch
+        plot_settings_revision = self.view.plot_settings_revision
         self.current_spec = spec
         frame = snapshot.dataset.frame
         mask = snapshot.mask
@@ -86,7 +107,12 @@ class HistogramController(QObject):
         token = self._submit_task(
             "histogram",
             lambda cancel: prepare_histogram(frame, spec, mask, cancel=cancel),
-            success=lambda data: self._install_histogram(data, spec, epoch),
+            success=lambda data: self._install_histogram(
+                data,
+                spec,
+                epoch,
+                plot_settings_revision,
+            ),
             failure=self._prepare_failure,
             receiver=self,
             exclusive_group="plots",
@@ -99,6 +125,7 @@ class HistogramController(QObject):
         data: HistogramData,
         spec: HistogramSpec,
         epoch: int,
+        plot_settings_revision: int,
     ) -> None:
         if self._closing or epoch != self._plot_epoch or spec != self.current_spec:
             return
@@ -120,8 +147,15 @@ class HistogramController(QObject):
             data.in_range,
             len(data.counts),
         )
-        self.view.set_feedback(data.description)
-        self._set_status("Distribution figure updated.")
+        if plot_settings_revision != self.view.plot_settings_revision:
+            warning = "Figure uses previous settings. Plot again to apply current settings."
+            self.view.set_feedback(f"{data.description}\n{warning}")
+            self._set_status(
+                "Figure updated with previous settings. Plot again to apply current settings."
+            )
+        else:
+            self.view.set_feedback(data.description)
+            self._set_status("Distribution figure updated.")
 
     def _prepare_failure(self, error: BaseException) -> None:
         if isinstance(error, CancelledError):
@@ -140,6 +174,8 @@ class HistogramController(QObject):
         self._invalidate_pending()
         try:
             self.view.plot_requested.disconnect(self.request_plot)
+            self.view.reset_requested.disconnect(self.reset_settings)
+            self.view.settings_updated.disconnect(self._settings_updated)
         except (RuntimeError, TypeError):
             pass
         self.view.panel.clear()
