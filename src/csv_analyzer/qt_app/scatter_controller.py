@@ -56,12 +56,15 @@ class ScatterController(QObject):
             self.current_counts = None
             self.view.set_dataset(snapshot.dataset)
             self.view.panel.clear()
+        self.view.mark_result_cleared()
+            self.view.mark_result_cleared()
             return
 
         if selection_changed:
             self._invalidate_pending()
             self.current_counts = None
             self.view.panel.clear("Selection changed. Plot again to use the current filters.")
+            self.view.mark_result_cleared()
             self.view.set_feedback("Selection changed. Plot again to use the current filters.")
 
     @Slot()
@@ -73,6 +76,7 @@ class ScatterController(QObject):
         self.current_counts = None
         self.view.reset_settings()
         self.view.panel.clear("Settings reset. Plot again.")
+        self.view.mark_result_cleared()
         self.view.set_feedback("Settings reset. Plot again.")
         self._set_status("Settings reset. Plot again.")
 
@@ -149,12 +153,14 @@ class ScatterController(QObject):
             len(data.excluded_x),
         )
         if plot_settings_revision != self.view.plot_settings_revision:
+            self.view.mark_previous_result()
             warning = "Figure uses previous settings. Plot again to apply current settings."
             self.view.set_feedback(f"{data.description}\n{warning}")
             self._set_status(
                 "Figure updated with previous settings. Plot again to apply current settings."
             )
         else:
+            self.view.mark_current_result()
             self.view.set_feedback(data.description)
             self._set_status("Relationship figure updated.")
 
