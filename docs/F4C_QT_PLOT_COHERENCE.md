@@ -257,3 +257,58 @@ F4.A Open/Reload, filter invalidation and PlotPanel lifecycle. No new 200k
 performance claim is made.
 
 `F3A-SIGSEGV-CI = INDETERMINATE` remains unchanged.
+
+## Final QA and integration record
+
+Final independent QA:
+
+```text
+QA06B-F4C-01 = VERIFIED
+PHYSICAL_F4C_X11 = NOT TESTED
+QT_CUTOVER_READINESS = CONDITIONAL
+```
+
+F4C-OBS-01:
+
+```text
+PARITY = functional parity against the approved V2 scope,
+not literal equivalence of every legacy widget.
+```
+
+The following conditions remain mandatory before any Qt cutover:
+
+1. Real validation on a physical Ubuntu/X11 session.
+2. A dedicated packaging/cutover gate covering:
+   - `varia-studio`;
+   - `python -m csv_analyzer`;
+   - the PySide6 dependency;
+   - README/install instructions;
+   - legacy compatibility.
+3. An explicit shutdown/teardown gate while preserving:
+   `F3A-SIGSEGV-CI = INDETERMINATE`.
+
+None of these cutover gates was executed as part of the F4.C integration.
+
+Final CI evidence:
+
+```text
+Workflow: F4.C Qt plot coherence
+Run: 42378806882
+Run number: 5
+Attempt: 1
+Result: SUCCESS
+HEAD: 7adff9404e693ebfcc04280bb74744ba65018da2
+Tree: 3e347da092d38c8a7aa90718a5546d98751ead67
+
+Artifact: f4-c-evidence
+Artifact ID: 13576941386
+Digest: sha256:0cdac418c0978d225c2c224fa9b328bfae875fc3fbd0eaebd01c048d650a6eac
+```
+
+F4.C was integrated into `main` by fast-forward only from
+`4c16a3258aef594363e5e338a1bad1362b37c32f` to
+`7adff9404e693ebfcc04280bb74744ba65018da2`, preserving the candidate tree
+`3e347da092d38c8a7aa90718a5546d98751ead67` unchanged.
+
+`F3A-SIGSEGV-CI = INDETERMINATE` remains unchanged and is not considered
+resolved.
