@@ -19,7 +19,6 @@ from csv_analyzer.data import Dataset, describe_columns
 from csv_analyzer.plots import prepare_histogram, prepare_scatter
 from csv_analyzer.qt_app.coordinator import Lifecycle, QtCoordinator
 from csv_analyzer.qt_app.shell import QtShell
-from csv_analyzer.state import FilterRule
 from csv_analyzer.table import SearchMode, SortDirection, SortSpec, TableScope
 
 APP = QApplication.instance() or QApplication(["varia-f5a-ux-tests"])
