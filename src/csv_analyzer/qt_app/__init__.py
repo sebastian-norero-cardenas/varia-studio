@@ -1,10 +1,10 @@
-"""PySide6 foundation for the staged Varia Studio desktop migration."""
+"""Canonical PySide6 frontend for Varia Studio."""
 
 from __future__ import annotations
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Start the optional Qt interface without importing Qt at package import time."""
+    """Start the canonical Qt desktop application without eager Qt initialization."""
     from .bootstrap import main as bootstrap_main
 
     return bootstrap_main(argv)
