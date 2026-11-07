@@ -1,0 +1,307 @@
+name: F5.A UX productization
+
+on:
+  push:
+    branches:
+      - feat/f5-a-ux-productization
+
+permissions:
+  contents: read
+
+jobs:
+  focal-python:
+    name: F5.A UX focal / Python ${{ matrix.python-version }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12"]
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONFAULTHANDLER: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Linux Qt runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libegl1 libgl1 libopengl0 libfontconfig1 \
+            libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 \
+            libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 \
+            libxcb-util1 libxcb-xinerama0 libxcb-xkb1
+
+      - name: Install focal environment
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python -m pip install --upgrade pip
+          if [ "${{ matrix.python-version }}" = "3.12" ]; then
+            python -m pip install -c constraints-python312.txt -e '.[dev]'
+          else
+            python -m pip install -e '.[dev]'
+          fi
+          python -m pip check
+
+      - name: F5.A UX focal
+        run: python -m unittest -v tests.test_qt_ux_productization
+
+  verify:
+    name: F5.A UX regressions / build / installed smoke
+    needs: focal-python
+    runs-on: ubuntu-22.04
+    timeout-minutes: 85
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONFAULTHANDLER: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify baseline ancestry
+        run: |
+          set -euxo pipefail
+          test "$(git merge-base HEAD f86e4796170279e34a8976d00d1293d216ad4824)" = \
+            "f86e4796170279e34a8976d00d1293d216ad4824"
+          test -z "$(git status --porcelain)"
+          git rev-parse HEAD
+          git rev-parse HEAD^{tree}
+
+      - name: Install Linux GUI runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            xvfb libegl1 libgl1 libopengl0 libfontconfig1 \
+            libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 \
+            libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 \
+            libxcb-util1 libxcb-xinerama0 libxcb-xkb1
+
+      - name: Install development environment
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -c constraints-python312.txt -e '.[dev]'
+          python -m pip check
+
+      - name: F5.A UX focal
+        run: python -m unittest -v tests.test_qt_ux_productization 2>&1 | tee /tmp/f5a-ux-tests.txt
+
+      - name: F3.B table regression
+        run: |
+          python -m unittest -v \
+            tests.test_qt_table.QtTableTests.test_model_rows_columns_source_identity_headers_display_tooltip_and_flags \
+            tests.test_qt_table.QtTableTests.test_copy_uses_underlying_values_exactly_and_does_not_change_app_state \
+            tests.test_qt_table.QtTableTests.test_close_detaches_table_model_before_qobject_teardown
+
+      - name: F3.C filters regression
+        run: |
+          python -m unittest -v \
+            tests.test_qt_filters.QtFilterTests.test_apply_rules_and_clear_commit_revisions_and_zero_selected \
+            tests.test_qt_filters.QtFilterTests.test_latest_request_wins \
+            tests.test_qt_filters.QtFilterTests.test_failure_and_cancel_preserve_previous_selection
+
+      - name: F3.D Scatter regression
+        run: |
+          python -m unittest -v \
+            tests.test_qt_scatter.QtScatterTests.test_latest_request_wins \
+            tests.test_qt_scatter.QtScatterTests.test_dataset_and_selection_changes_invalidate_plot_but_failed_load_does_not \
+            tests.test_qt_scatter.QtScatterTests.test_close_with_active_worker_never_publishes
+
+      - name: F3.E Histogram regression
+        run: |
+          python -m unittest -v \
+            tests.test_qt_histogram.QtHistogramTests.test_latest_histogram_request_wins \
+            tests.test_qt_histogram.QtHistogramTests.test_pending_histogram_is_invalidated_by_selection_revision_change \
+            tests.test_qt_histogram.QtHistogramTests.test_close_visible_figure_and_active_worker
+
+      - name: F3.F Statistics regression
+        run: |
+          python -m unittest -v \
+            tests.test_qt_statistics.StatisticsQtTests.test_numeric_semantics_sample_population_missing_infinite_huge_single \
+            tests.test_qt_statistics.StatisticsQtTests.test_latest_request_wins_for_ddof_mode_and_columns \
+            tests.test_qt_statistics.StatisticsQtTests.test_empty_modes_errors_model_failure_and_close_active_worker
+
+      - name: F3.G Export regression
+        run: |
+          python -m unittest -v \
+            tests.test_qt_exporting.QtExportTests.test_figure_png_pdf_svg_and_dpi_values \
+            tests.test_qt_exporting.QtExportTests.test_stale_figure_dialog_guard_prevents_export \
+            tests.test_qt_exporting.QtExportTests.test_close_with_save_dialog_open_rejects_dialog_and_closes_cleanly
+
+      - name: F4.A Shell/import regression
+        run: |
+          python -m unittest -v \
+            tests.test_qt_import_shell.QtImportShellTests.test_open_success_activates_data_tab_from_statistics \
+            tests.test_qt_import_shell.QtImportShellTests.test_reload_and_open_share_latest_load_semantics \
+            tests.test_qt_import_shell.QtImportShellTests.test_import_dialog_survives_dataset_commit_and_application_close_rejects_it
+
+      - name: F4.B advanced Scatter regression
+        run: python -m unittest -v tests.test_qt_scatter_advanced.ScatterAdvancedTests
+
+      - name: F4.C plot coherence regression
+        run: python -m unittest -v tests.test_qt_plot_configuration.PlotConfigurationTests
+
+      - name: F4.D canonical routing and lifecycle smoke
+        run: |
+          python -m unittest -v \
+            tests.test_qt_cutover.CanonicalQtCutoverTests \
+            tests.test_qt_foundation.ShellCloseProbeTests.test_quit_button_exits_real_event_loop
+
+      - name: Ruff focal
+        run: |
+          python -m ruff check \
+            src/csv_analyzer/qt_app/plot_panel.py \
+            src/csv_analyzer/qt_app/scatter_view.py \
+            src/csv_analyzer/qt_app/scatter_controller.py \
+            src/csv_analyzer/qt_app/histogram_view.py \
+            src/csv_analyzer/qt_app/histogram_controller.py \
+            src/csv_analyzer/qt_app/table_view.py \
+            src/csv_analyzer/qt_app/table_controller.py \
+            src/csv_analyzer/qt_app/table_model.py \
+            src/csv_analyzer/qt_app/statistics_view.py \
+            src/csv_analyzer/qt_app/filter_dialog.py \
+            src/csv_analyzer/qt_app/shell.py \
+            tests/test_qt_ux_productization.py
+          python -m ruff format --check \
+            src/csv_analyzer/qt_app/plot_panel.py \
+            src/csv_analyzer/qt_app/scatter_view.py \
+            src/csv_analyzer/qt_app/scatter_controller.py \
+            src/csv_analyzer/qt_app/histogram_view.py \
+            src/csv_analyzer/qt_app/histogram_controller.py \
+            src/csv_analyzer/qt_app/table_view.py \
+            src/csv_analyzer/qt_app/table_controller.py \
+            src/csv_analyzer/qt_app/table_model.py \
+            src/csv_analyzer/qt_app/statistics_view.py \
+            src/csv_analyzer/qt_app/filter_dialog.py \
+            src/csv_analyzer/qt_app/shell.py \
+            tests/test_qt_ux_productization.py
+
+      - name: Build wheel and sdist
+        run: |
+          mkdir -p dist
+          python -m build
+          sha256sum dist/* | tee dist/SHA256SUMS
+
+      - name: Clean canonical wheel install
+        shell: bash
+        run: |
+          set -euxo pipefail
+          WHEEL="$(readlink -f "$(ls dist/*.whl)")"
+          VENV=/tmp/varia-f5a-ux
+          python -m venv "$VENV"
+          "$VENV/bin/python" -m pip install --upgrade pip
+          "$VENV/bin/pip" install -c "$GITHUB_WORKSPACE/constraints-python312.txt" "$WHEEL"
+          "$VENV/bin/pip" check
+
+      - name: Installed canonical Qt UX and lifecycle smoke
+        shell: bash
+        run: |
+          set -euxo pipefail
+          VENV=/tmp/varia-f5a-ux
+          RUNTIME=/tmp/varia-f5a-ux-runtime
+          mkdir -p "$RUNTIME"
+          cat > "$RUNTIME/ux_smoke.py" <<'PY'
+          from pathlib import Path
+          from PySide6.QtCore import QEventLoop, QTimer
+
+          from csv_analyzer.qt_app.bootstrap import create_application
+          from csv_analyzer.qt_app.coordinator import Lifecycle
+
+          def pump(predicate, timeout_ms=10000):
+              if predicate():
+                  return
+              loop = QEventLoop()
+              poll = QTimer()
+              timeout = QTimer()
+              expired = {"value": False}
+              poll.setInterval(2)
+              timeout.setSingleShot(True)
+              poll.timeout.connect(lambda: loop.quit() if predicate() else None)
+              timeout.timeout.connect(lambda: (expired.__setitem__("value", True), loop.quit()))
+              poll.start()
+              timeout.start(timeout_ms)
+              loop.exec()
+              poll.stop()
+              timeout.stop()
+              assert not expired["value"] or predicate()
+
+          sample = Path("sample.csv")
+          sample.write_text("x,y,z\n1,2,3\n2,4,6\n3,6,9\n", encoding="utf-8")
+
+          app, coordinator, shell = create_application()
+          coordinator.start()
+          shell.resize(1100, 700)
+          shell.show()
+          coordinator.load_path(sample)
+          pump(lambda: coordinator.runner.activity.physical == 0)
+
+          assert shell.width() >= 1100
+          assert shell.height() >= 700
+          assert shell.cancel_button.text() == "Cancel tasks"
+          assert shell.notices_widget.isHidden()
+
+          shell.tabs.setCurrentWidget(shell.statistics_view)
+          shell.table_view.set_search_text("x")
+          shell.find_action.trigger()
+          app.processEvents()
+          assert shell.tabs.currentWidget() is shell.data_tab
+          assert shell.table_view.search_edit.selectedText() == "x"
+
+          coordinator.scatter_controller.request_plot()
+          pump(lambda: coordinator.runner.activity.physical == 0)
+          scatter = shell.scatter_view
+          assert scatter.panel.result_state.text() == "Current"
+          figure = scatter.panel.figure
+          index = scatter.x_axis.column.findText("z")
+          scatter.x_axis.column.setCurrentIndex(index)
+          scatter.x_axis.column.activated.emit(index)
+          assert scatter.panel.figure is figure
+          assert scatter.panel.result_state.text() == "Changes not applied"
+          assert scatter.plot_button.text() == "Update plot"
+
+          shell.close()
+          pump(lambda: coordinator.lifecycle is Lifecycle.CLOSED and not shell.isVisible())
+          assert coordinator.runner.activity.physical == 0
+          print("installed_ux_smoke=PASS")
+          print("lifecycle=CLOSED")
+          PY
+          (
+            cd "$RUNTIME"
+            unset PYTHONPATH || true
+            QT_QPA_PLATFORM=offscreen "$VENV/bin/python" ux_smoke.py
+          ) 2>&1 | tee /tmp/f5a-installed-smoke.txt
+
+      - name: Record evidence
+        run: |
+          {
+            echo "commit=$(git rev-parse HEAD)"
+            echo "tree=$(git rev-parse HEAD^{tree})"
+            echo "baseline=f86e4796170279e34a8976d00d1293d216ad4824"
+            echo "python=$(python --version 2>&1)"
+            echo "pyside6=$(python -c 'import PySide6; print(PySide6.__version__)')"
+            echo "PHYSICAL_F5A_UX1=NOT TESTED"
+            echo "F3A-SIGSEGV-CI=INDETERMINATE"
+          } | tee dist/f5a-ux-environment.txt
+          cp /tmp/f5a-ux-tests.txt dist/f5a-ux-tests.txt
+          cp /tmp/f5a-installed-smoke.txt dist/f5a-installed-smoke.txt
+          test -s dist/f5a-ux-tests.txt
+          test -s dist/f5a-installed-smoke.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: f5-a-ux-evidence
+          path: dist/*
+          if-no-files-found: error
