@@ -34,9 +34,11 @@ class IdentityTests(unittest.TestCase):
             'description = "Varia Studio: a desktop workspace for exploring CSV and scientific DAT datasets"',
             text,
         )
-        self.assertIn('varia-studio = "csv_analyzer.app:main"', text)
-        self.assertIn('csv-analyzer = "csv_analyzer.app:main"', text)
-        self.assertEqual(text.count('= "csv_analyzer.app:main"'), 2)
+        self.assertIn('varia-studio = "csv_analyzer.qt_app:main"', text)
+        self.assertIn('csv-analyzer = "csv_analyzer.qt_app:main"', text)
+        self.assertIn('varia-studio-qt = "csv_analyzer.qt_app:main"', text)
+        self.assertEqual(text.count('= "csv_analyzer.qt_app:main"'), 3)
+        self.assertNotIn('= "csv_analyzer.app:main"', text)
 
     def test_module_cli_help_keeps_dataset_argument(self):
         result = subprocess.run(
