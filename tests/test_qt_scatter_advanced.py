@@ -112,6 +112,41 @@ class ScatterAdvancedTests(unittest.TestCase):
         pump_until(lambda: coordinator.runner.activity.physical == 0)
         APP.processEvents()
 
+    def test_pending_plot_preserves_advanced_settings_warning_after_appearance_apply(self):
+        coordinator, shell = self.make()
+        self.commit(coordinator, base_frame())
+        view = shell.scatter_view
+        view.style = ScatterStyle(title="A")
+        entered = threading.Event()
+        release = threading.Event()
+
+        def blocked_prepare(frame, spec, mask=None, *, cancel=None):
+            entered.set()
+            release.wait(timeout=5)
+            return prepare_scatter(frame, spec, mask, cancel=cancel)
+
+        with patch("csv_analyzer.qt_app.scatter_controller.prepare_scatter", blocked_prepare):
+            coordinator.scatter_controller.request_plot()
+            self.assertTrue(entered.wait(timeout=2))
+
+            dialog = view.open_style_dialog()
+            dialog.title.setText("B")
+            dialog._apply()
+            APP.processEvents()
+            self.assertEqual(view.style.title, "B")
+            self.assertIn("Plot again", view.local_status.text())
+            self.assertIn("Plot again", shell.status_label.text())
+
+            release.set()
+            pump_until(lambda: coordinator.runner.activity.physical == 0)
+            APP.processEvents()
+
+        self.assertEqual(coordinator.scatter_controller.current_spec.title, "A")
+        self.assertEqual(view.style.title, "B")
+        self.assertEqual(view.panel.figure.axes[0].get_title(loc="left"), "A")
+        self.assertIn("Plot again", view.local_status.text())
+        self.assertIn("Plot again", shell.status_label.text())
+
     def test_style_defaults_save_cancel_and_spec_mapping(self):
         coordinator, shell = self.make()
         self.commit(coordinator, base_frame())
