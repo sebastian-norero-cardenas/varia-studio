@@ -302,9 +302,7 @@ class ScatterAdvancedTests(unittest.TestCase):
             log_bad.build_inset()
 
         with self.assertRaises(DataError):
-            validate_scatter(
-                ScatterSpec("x", "y", inset=InsetSpec(1, 2, 1, 2, location="middle"))
-            )
+            validate_scatter(ScatterSpec("x", "y", inset=InsetSpec(1, 2, 1, 2, location="middle")))
 
         coordinator, shell = self.make()
         self.commit(coordinator, base_frame())
