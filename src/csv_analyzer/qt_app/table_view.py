@@ -261,7 +261,12 @@ class TableView(QWidget):
     def set_search_status(self, text: str, *, show_all: bool = False) -> None:
         self.match_label.setText(text)
         self.show_all_button.setVisible(self._has_dataset and show_all)
-        navigable = self._has_dataset and bool(text) and text != "Searching…"
+        navigable = (
+            self._has_dataset
+            and bool(text)
+            and text != "Searching…"
+            and not text.startswith("0 matches")
+        )
         self.previous_button.setEnabled(navigable)
         self.next_button.setEnabled(navigable)
 
