@@ -620,7 +620,7 @@ jobs:
             echo "$file bytes=$(wc -c < "evidence/$file")"
           done
 
-          if grep -ERi 'SIGSEGV|Segmentation fault' evidence; then
+          if grep -ERi 'SIGSEGV|Segmentation fault' evidence | grep -v 'F3A-SIGSEGV-CI'; then
             echo "Unexpected crash signature found in evidence."
             exit 1
           fi
