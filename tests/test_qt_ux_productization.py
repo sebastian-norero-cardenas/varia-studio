@@ -12,7 +12,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import numpy as np
 import pandas as pd
-from PySide6.QtCore import QEventLoop, QTimer, Qt
+from PySide6.QtCore import QEventLoop, Qt, QTimer
 from PySide6.QtWidgets import QApplication, QWidget
 
 from csv_analyzer.data import Dataset, describe_columns
