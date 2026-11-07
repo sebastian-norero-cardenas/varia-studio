@@ -36,6 +36,7 @@ class TableView(QWidget):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
+        self._has_dataset = False
         layout = QVBoxLayout(self)
 
         scope_row = QHBoxLayout()
@@ -117,17 +118,57 @@ class TableView(QWidget):
         header.sectionClicked.connect(self._header_clicked)
         layout.addWidget(self.table, 1)
 
-        copy_action = QAction(self)
-        copy_action.setShortcut(QKeySequence.StandardKey.Copy)
-        copy_action.setShortcutContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
-        copy_action.triggered.connect(self.copy_requested)
-        self.addAction(copy_action)
+        self.copy_action = QAction(self)
+        self.copy_action.setShortcut(QKeySequence.StandardKey.Copy)
+        self.copy_action.setShortcutContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self.copy_action.triggered.connect(self.copy_requested)
+        self.addAction(self.copy_action)
 
         self._sort_column: int | None = None
         self._sort_direction = SortDirection.ASC
+        self.set_dataset_available(False)
 
     def set_model(self, model) -> None:
         self.table.setModel(model)
+
+    def set_dataset_available(self, available: bool) -> None:
+        self._has_dataset = bool(available)
+        for widget in (
+            self.scope_combo,
+            self.reset_sort_button,
+            self.search_edit,
+            self.search_mode,
+            self.go_edit,
+            self.go_button,
+        ):
+            widget.setEnabled(self._has_dataset)
+        self.table.setEnabled(self._has_dataset)
+        self.copy_action.setEnabled(self._has_dataset)
+        if not self._has_dataset:
+            self.previous_button.setEnabled(False)
+            self.next_button.setEnabled(False)
+            self.show_all_button.hide()
+            self.match_label.clear()
+            self.feedback_label.setText("Open a dataset to inspect rows.")
+        else:
+            self.previous_button.setEnabled(bool(self.match_label.text()))
+            self.next_button.setEnabled(bool(self.match_label.text()))
+
+    def focus_search(self) -> None:
+        if not self._has_dataset:
+            return
+        self.search_edit.setFocus(Qt.FocusReason.ShortcutFocusReason)
+        self.search_edit.selectAll()
+
+    def set_pending(self, message: str) -> None:
+        self.feedback_label.setText(message)
+
+    def set_search_pending(self) -> None:
+        self.match_label.setText("Searching…")
+        self.show_all_button.hide()
+        self.previous_button.setEnabled(False)
+        self.next_button.setEnabled(False)
+        self.feedback_label.setText("Searching…")
 
     def prepare_close(self) -> None:
         """Stop deferred UI work and detach the cross-owner model safely."""
@@ -202,6 +243,7 @@ class TableView(QWidget):
 
     def set_filter_state(self, rule_count: int, *, enabled: bool) -> None:
         self.filter_button.setText(f"Filters · {rule_count if rule_count else 'none'}")
+        enabled = self._has_dataset and enabled
         self.filter_button.setEnabled(enabled)
         self.filter_button.setToolTip(
             "Edit inclusive numeric filters on raw dataset values."
@@ -218,7 +260,10 @@ class TableView(QWidget):
 
     def set_search_status(self, text: str, *, show_all: bool = False) -> None:
         self.match_label.setText(text)
-        self.show_all_button.setVisible(show_all)
+        self.show_all_button.setVisible(self._has_dataset and show_all)
+        navigable = self._has_dataset and bool(text) and text != "Searching…"
+        self.previous_button.setEnabled(navigable)
+        self.next_button.setEnabled(navigable)
 
     def set_feedback(self, text: str) -> None:
         self.feedback_label.setText(text)
