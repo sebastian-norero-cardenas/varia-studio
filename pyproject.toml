@@ -9,14 +9,17 @@ description = "Varia Studio: a desktop workspace for exploring CSV and scientifi
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "customtkinter>=5.2,<6",
     "pandas>=2.2,<4",
     "numpy>=1.26,<3",
     "matplotlib>=3.8,<4",
+    "PySide6>=6.11.3,<6.13",
 ]
 
 [project.optional-dependencies]
-qt = ["PySide6>=6.11.3,<6.13"]
+qt = []
+legacy = [
+    "customtkinter>=5.2,<6",
+]
 dev = [
     "ruff>=0.8",
     "build>=1.2",
@@ -24,8 +27,8 @@ dev = [
 ]
 
 [project.scripts]
-varia-studio = "csv_analyzer.app:main"
-csv-analyzer = "csv_analyzer.app:main"
+varia-studio = "csv_analyzer.qt_app:main"
+csv-analyzer = "csv_analyzer.qt_app:main"
 varia-studio-qt = "csv_analyzer.qt_app:main"
 
 [tool.setuptools.packages.find]
