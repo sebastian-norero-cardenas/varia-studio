@@ -335,6 +335,16 @@ class TableController(QObject):
             return
         preserved_ids, current_id = self.view.capture_selection(self.model)
         self.model.replace_row_map(row_map)
+        self.view.set_scope(row_map.scope)
+        if row_map.sort_spec is None:
+            self.view.reset_sort_indicator()
+        else:
+            try:
+                logical_column = self.model.columns.index(row_map.sort_spec.column) + 1
+            except ValueError:
+                self.view.reset_sort_indicator()
+            else:
+                self.view.set_sort_indicator(logical_column, row_map.sort_spec.direction)
         self.view.restore_selection(self.model, preserved_ids, current_id)
         self._sync_current_match_to_source_id(current_id)
         self._update_counts_and_empty_state(snapshot)
@@ -566,7 +576,26 @@ class TableController(QObject):
         elif self.search_spec is None:
             self.view.set_feedback("Ready")
 
+    def _restore_published_projection_controls(self) -> None:
+        row_map = self.model.row_map
+        if row_map is None:
+            return
+        self.scope = row_map.scope
+        self.sort_spec = row_map.sort_spec
+        self.view.set_scope(row_map.scope)
+        if row_map.sort_spec is None:
+            self.view.reset_sort_indicator()
+            return
+        try:
+            logical_column = self.model.columns.index(row_map.sort_spec.column) + 1
+        except ValueError:
+            self.view.reset_sort_indicator()
+            return
+        self.view.set_sort_indicator(logical_column, row_map.sort_spec.direction)
+
     def _derived_failure(self, error: BaseException, operation: str = "view") -> None:
+        if operation in {"sort", "view"}:
+            self._restore_published_projection_controls()
         cause = str(error).strip() or type(error).__name__
         prefix = {
             "sort": "Could not sort the table",
