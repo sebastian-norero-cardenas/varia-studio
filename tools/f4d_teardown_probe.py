@@ -202,8 +202,7 @@ def main() -> int:
     run_scenario(args.scenario)
     elapsed = time.monotonic() - start
     print(
-        f"scenario={args.scenario} lifecycle=CLOSED physical=0 "
-        f"exit=0 elapsed_seconds={elapsed:.3f}"
+        f"scenario={args.scenario} lifecycle=CLOSED physical=0 exit=0 elapsed_seconds={elapsed:.3f}"
     )
     return 0
 
