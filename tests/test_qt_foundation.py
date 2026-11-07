@@ -1285,7 +1285,7 @@ builtins.__import__ = guarded
             "csv_analyzer.plots, csv_analyzer.exports",
         )
 
-    def test_metadata_keeps_pyside6_in_qt_extra_only(self):
+    def test_metadata_makes_pyside6_base_and_ctk_legacy_only(self):
         try:
             import tomllib
         except ModuleNotFoundError:
@@ -1295,8 +1295,12 @@ builtins.__import__ = guarded
         base_dependencies = metadata["project"]["dependencies"]
         extras = metadata["project"]["optional-dependencies"]
 
-        self.assertFalse(any(item.lower().startswith("pyside6") for item in base_dependencies))
-        self.assertTrue(any(item.startswith("PySide6>=6.11.3,<6.13") for item in extras["qt"]))
+        self.assertTrue(any(item.startswith("PySide6>=6.11.3,<6.13") for item in base_dependencies))
+        self.assertFalse(any(item.lower().startswith("customtkinter") for item in base_dependencies))
+        self.assertEqual(extras["qt"], [])
+        self.assertTrue(
+            any(item.startswith("customtkinter>=5.2,<6") for item in extras["legacy"])
+        )
 
     def test_qt_package_and_bootstrap_import_without_pyside6(self):
         self.run_guarded_import(
@@ -1325,7 +1329,7 @@ raise SystemExit(main([]))
             env={**os.environ, "QT_QPA_PLATFORM": "offscreen"},
         )
         self.assertEqual(result.returncode, 2)
-        self.assertIn("Install Varia Studio with the 'qt' extra.", result.stderr)
+        self.assertIn("Reinstall Varia Studio in this environment", result.stderr)
         self.assertNotIn("Traceback", result.stderr)
 
     def test_qt_does_not_import_tk_and_ctk_does_not_import_qt(self):
@@ -1338,11 +1342,12 @@ raise SystemExit(main([]))
             "import csv_analyzer.app",
         )
 
-    def test_packaging_keeps_both_ctk_entrypoints_and_adds_qt(self):
+    def test_packaging_routes_all_public_entrypoints_to_qt(self):
         text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
-        self.assertIn('varia-studio = "csv_analyzer.app:main"', text)
-        self.assertIn('csv-analyzer = "csv_analyzer.app:main"', text)
+        self.assertIn('varia-studio = "csv_analyzer.qt_app:main"', text)
+        self.assertIn('csv-analyzer = "csv_analyzer.qt_app:main"', text)
         self.assertIn('varia-studio-qt = "csv_analyzer.qt_app:main"', text)
+        self.assertNotIn('= "csv_analyzer.app:main"', text)
 
 
 if __name__ == "__main__":
