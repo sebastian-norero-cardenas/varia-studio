@@ -95,6 +95,7 @@ class ScatterView(QWidget):
         super().__init__(parent)
         self._dataset: Dataset | None = None
         self._settings_epoch = 0
+        self._advanced_revision = 0
         self._style_dialog: ScatterStyleDialog | None = None
         self._overlay_dialog: ScatterOverlayDialog | None = None
         self._inset_dialog: ScatterInsetDialog | None = None
@@ -177,6 +178,10 @@ class ScatterView(QWidget):
     def settings_epoch(self) -> int:
         return self._settings_epoch
 
+    @property
+    def advanced_revision(self) -> int:
+        return self._advanced_revision
+
     def set_dataset(self, dataset: Dataset | None) -> None:
         self._dataset = dataset
         self._reset_controls(dataset)
@@ -187,6 +192,7 @@ class ScatterView(QWidget):
     def _reset_controls(self, dataset: Dataset | None) -> None:
         self.close_advanced_dialogs()
         self._settings_epoch += 1
+        self._advanced_revision += 1
         columns = dataset.numeric_columns if dataset is not None else ()
         x_current = columns[0] if columns else None
         y_current = columns[1] if len(columns) > 1 else (columns[0] if columns else None)
@@ -287,7 +293,10 @@ class ScatterView(QWidget):
     def _apply_style(self, style: object, epoch: int) -> None:
         if epoch != self._settings_epoch or not isinstance(style, ScatterStyle):
             return
+        if style == self.style:
+            return
         self.style = style
+        self._advanced_revision += 1
         message = "Appearance updated. Plot again to apply it."
         self.set_feedback(message)
         self.settings_updated.emit(message)
@@ -315,7 +324,10 @@ class ScatterView(QWidget):
     def _apply_overlays(self, overlays: object, epoch: int) -> None:
         if epoch != self._settings_epoch or not isinstance(overlays, tuple):
             return
+        if overlays == self.overlays:
+            return
         self.overlays = overlays
+        self._advanced_revision += 1
         self.overlay_button.setText(f"Annotations · {len(overlays)}")
         message = "Annotations updated. Plot again to apply them."
         self.set_feedback(message)
@@ -351,7 +363,10 @@ class ScatterView(QWidget):
             return
         if inset is not None and not isinstance(inset, InsetSpec):
             return
+        if inset == self.inset:
+            return
         self.inset = inset
+        self._advanced_revision += 1
         self.inset_button.setText(f"Inset zoom · {'on' if inset is not None else 'off'}")
         message = "Inset updated. Plot again to apply it."
         self.set_feedback(message)
