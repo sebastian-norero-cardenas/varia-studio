@@ -156,10 +156,12 @@ class TableController(QObject):
         if snapshot.dataset is None:
             self.visible_columns = ()
             self.model.replace_dataset(None, None)
+            self.view.set_dataset_available(False)
             self.view.set_counts(self.scope, 0, 0, 0)
-            self.view.set_feedback("No dataset loaded")
+            self.view.set_feedback("Open a dataset to inspect rows.")
             return
 
+        self.view.set_dataset_available(True)
         self.visible_columns = tuple(str(name) for name in snapshot.dataset.frame.columns)
         row_map = build_row_map(
             snapshot.dataset.frame,
@@ -208,8 +210,13 @@ class TableController(QObject):
         recalculate_search = self._prepare_row_map_change()
         self.scope = scope
         self.view.set_scope(scope)
+        self.view.set_pending("Updating view…")
         self.table_epoch += 1
-        self._request_row_map(snapshot, recalculate_search=recalculate_search)
+        self._request_row_map(
+            snapshot,
+            recalculate_search=recalculate_search,
+            operation="view",
+        )
 
     def set_sort(self, logical_column: int, direction: SortDirection) -> None:
         snapshot = self._snapshot_provider()
@@ -225,8 +232,13 @@ class TableController(QObject):
         recalculate_search = self._prepare_row_map_change()
         self.sort_spec = SortSpec(column, direction)
         self.view.set_sort_indicator(logical_column, direction)
+        self.view.set_pending("Sorting…")
         self.table_epoch += 1
-        self._request_row_map(snapshot, recalculate_search=recalculate_search)
+        self._request_row_map(
+            snapshot,
+            recalculate_search=recalculate_search,
+            operation="sort",
+        )
 
     def reset_sort(self) -> None:
         if self.model.dataset is None:
@@ -235,10 +247,12 @@ class TableController(QObject):
         self._cancel_task("table-order")
         self.sort_spec = None
         self.view.reset_sort_indicator()
+        self.view.set_pending("Updating view…")
         self.table_epoch += 1
         self._request_row_map(
             self._snapshot_provider(),
             recalculate_search=recalculate_search,
+            operation="view",
         )
 
     def _request_row_map(
@@ -246,6 +260,7 @@ class TableController(QObject):
         snapshot: StateSnapshot,
         *,
         recalculate_search: bool = False,
+        operation: str = "view",
     ) -> None:
         dataset = snapshot.dataset
         if dataset is None:
@@ -295,7 +310,7 @@ class TableController(QObject):
                 sort_spec,
                 recalculate_search,
             ),
-            failure=self._derived_failure,
+            failure=lambda error: self._derived_failure(error, operation),
             receiver=self,
             exclusive_group="table-derived",
         )
@@ -323,6 +338,7 @@ class TableController(QObject):
         self.view.restore_selection(self.model, preserved_ids, current_id)
         self._sync_current_match_to_source_id(current_id)
         self._update_counts_and_empty_state(snapshot)
+        self.view.set_feedback("Ready")
 
         if self._pending_go_source_id is not None:
             source_id = self._pending_go_source_id
@@ -352,6 +368,7 @@ class TableController(QObject):
         self.search_spec = spec
         self.search_result = None
         self.current_match = None
+        self.view.set_search_pending()
         self._request_search(self._snapshot_provider(), spec)
 
     def activate_search(self, text: str, mode: SearchMode) -> None:
@@ -385,6 +402,7 @@ class TableController(QObject):
                 cancel=cancel,
             )
 
+        self.view.set_search_pending()
         token = self._submit_task(
             "table-search",
             work,
@@ -409,11 +427,13 @@ class TableController(QObject):
         self.search_result = result
         self.current_match = None
         self._refresh_search_navigation(autonavigate=True)
+        self.view.set_feedback("Ready")
 
     def _search_failure(self, error: BaseException, spec: SearchSpec) -> None:
         if self._pending_search_spec == spec:
             self._pending_search_spec = None
-        self._derived_failure(error)
+        self.view.set_search_status("")
+        self._derived_failure(error, "search")
 
     def _visible_match_rows(self) -> list[int]:
         if self.search_result is None or self.model.row_map is None:
@@ -534,7 +554,7 @@ class TableController(QObject):
         dataset = snapshot.dataset
         if dataset is None:
             self.view.set_counts(self.scope, 0, 0, 0)
-            self.view.set_feedback("No dataset loaded")
+            self.view.set_feedback("Open a dataset to inspect rows.")
             return
         total = len(dataset.frame)
         visible = self.model.rowCount()
@@ -546,5 +566,11 @@ class TableController(QObject):
         elif self.search_spec is None:
             self.view.set_feedback("Ready")
 
-    def _derived_failure(self, error: BaseException) -> None:
-        self.view.set_feedback(f"Table operation failed: {type(error).__name__}")
+    def _derived_failure(self, error: BaseException, operation: str = "view") -> None:
+        cause = str(error).strip() or type(error).__name__
+        prefix = {
+            "sort": "Could not sort the table",
+            "search": "Could not search the dataset",
+            "view": "Could not update the table view",
+        }.get(operation, "Could not update the table view")
+        self.view.set_feedback(f"{prefix}: {cause}")
