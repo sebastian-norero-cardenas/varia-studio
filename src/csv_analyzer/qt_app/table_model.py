@@ -95,7 +95,9 @@ class DataFrameTableModel(QAbstractTableModel):
             if role == Qt.ItemDataRole.DisplayRole:
                 return name
             if role == Qt.ItemDataRole.ToolTipRole and self._dataset is not None:
-                info = next((column for column in self._dataset.columns if column.name == name), None)
+                info = next(
+                    (column for column in self._dataset.columns if column.name == name), None
+                )
                 if info is None:
                     return name
                 lines = [
