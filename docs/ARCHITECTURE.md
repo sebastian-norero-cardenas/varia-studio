@@ -1,21 +1,34 @@
 # Architecture
 
-## Ownership and dependency direction
+## Canonical frontend and dependency direction
 
-`Application` coordinates one `AppState`, one `TaskRunner` and four views.
-Views read the shared state and submit requests; they never own replacement
-dataframes or update another tab's selectors. `Application.app_state` is distinct
-from Tk's inherited `state()` window method.
+PySide6/Qt is the canonical Varia Studio desktop frontend. The public launchers
+`varia-studio`, `csv-analyzer`, `varia-studio-qt`, and
+`python -m csv_analyzer` all route to `csv_analyzer.qt_app`.
+
+`QtCoordinator` owns one `AppState`, one bounded `QtTaskRunner`, and the
+four Qt views. Views read shared snapshots and submit work through the
+coordinator; they do not own replacement dataframes or update another view's
+selectors.
 
 `data.py` has no GUI dependency and returns a complete `Dataset` candidate.
-`analysis.py` implements numerical operations without Matplotlib or Tk.
-`plots.py` transforms selected column arrays into validated plot data, then creates
-object-oriented Matplotlib `Figure` instances without pyplot or a global backend.
-`exports.py` shares atomic destination handling between figures and tables.
+`analysis.py` implements numerical operations without GUI or Matplotlib.
+`plots.py` transforms selected column arrays into validated plot data, then
+creates object-oriented Matplotlib `Figure` instances without pyplot or a global
+backend. `exports.py` shares atomic destination handling between figures and
+tables.
 
-The UI is deliberately small: explicit views and focused dialogs, without a
-generic event framework, plugin layer or duplicated model objects. Configuration
-dataclasses make scientific choices inspectable and independently testable.
+The canonical UI uses explicit views and focused dialogs without a generic event
+framework, plugin layer or duplicated model objects. Configuration dataclasses
+make scientific choices inspectable and independently testable.
+
+The previous CustomTkinter frontend remains under `app.py` and `ui/` as a
+non-canonical legacy implementation. It is available only through the
+`[legacy]` dependency extra for compatibility/regression work and is not a
+public launcher. Its source is intentionally retained during the cutover phase.
+
+Importing `csv_analyzer` does not initialize either GUI toolkit. Qt imports are
+deferred until the canonical entry point starts the application.
 
 ## Dataset replacement
 
@@ -48,31 +61,26 @@ from the analytical selection.
 
 ## Threads and cancellation
 
-Two worker threads handle import and numerical work. They never call Tk, including
-`after()`. Each task key has a generation number and cancellation event; newer
-requests cancel and supersede older requests with that key. A queue carries results
-to a main-thread poller. Errors in a callback do not stop polling unrelated tasks.
+The canonical Qt frontend uses the application-owned bounded `QThread`
+scheduler approved by `ARQ-F3A-R4-01`. Each admitted request owns one
+`QThread`, with at most two active requests and at most eight
+application-pending requests. Newer generations supersede older work with the
+same task key, while publication also checks application, dataset and selection
+revisions.
 
-Cancellation checks occur during the structural scan and between analysis steps.
-Pandas parsing is one non-interruptible section. A cancelled parse may finish in
-the background, but it cannot publish stale state. Tk and Matplotlib creation,
-navigation, drawing and export remain on the main thread because their interactive
-backends are not thread-safe.
+`_active` retains physical ownership until `QThread.finished`, so
+`physical == 0` means the request's `run()` has completed and that completion
+has been recognized by the scheduler; it does not retrospectively resolve the
+historical `F3A-SIGSEGV-CI` incident.
 
-### F3.A Qt scheduler amendment
+Cancellation checks occur during structural scanning and between analysis
+steps. Pandas parsing is one non-interruptible section. A cancelled parse may
+finish in the background, but stale results cannot publish. Qt widgets,
+Matplotlib figure construction/rendering/navigation and export remain on the GUI
+thread.
 
-`ARQ-F3A-R4-01` approves the Qt-foundation scheduler as an
-application-owned bounded `QThread` scheduler rather than a private
-`QThreadPool`. Each admitted request owns one `QThread`, with at most two active
-requests and at most eight application-pending requests. `_active` retains
-physical ownership until the corresponding `QThread.finished` notification, so
-`physical == 0` means the request's `run()` has completed and that completion has
-been recognized by the scheduler; it does not claim pthread join/TLS teardown.
-Exclusive load replacement remains application-scheduled, allowing unrelated
-work to use the second worker while a prior load is still physically owned.
-
-This amendment applies to the PySide6 foundation only. The existing Tk/CTk
-worker architecture remains unchanged during the coexistence phase.
+The retained CTk implementation keeps its historical worker architecture only
+for legacy compatibility; it is not the canonical scheduler or frontend.
 
 ## Import and export choices
 
