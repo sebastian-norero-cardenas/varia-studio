@@ -59,9 +59,14 @@ class PlotPanel(QWidget):
         self.host_layout.addWidget(self.empty_label, 1)
         layout.addWidget(self.host, 1)
 
+        result_row = QHBoxLayout()
+        self.result_state = QLabel("No result", self)
+        self.result_state.setObjectName("plot-result-state")
+        result_row.addWidget(self.result_state)
         self.caption = QLabel("No figure yet", self)
         self.caption.setWordWrap(True)
-        layout.addWidget(self.caption)
+        result_row.addWidget(self.caption, 1)
+        layout.addLayout(result_row)
 
     @property
     def has_figure(self) -> bool:
@@ -108,6 +113,7 @@ class PlotPanel(QWidget):
         canvas.show()
         self.caption.setText(description)
         self.caption.setStyleSheet("")
+        self.set_result_state("Current")
         self.export_button.setEnabled(True)
         close_export_dialogs(self)
         self._dispose_tuple(*old)
@@ -122,10 +128,26 @@ class PlotPanel(QWidget):
         self.empty_label.show()
         self.caption.setText("No figure yet")
         self.caption.setStyleSheet("")
+        self.set_result_state("No result")
 
     def error(self, message: str) -> None:
-        self.caption.setText(f"Figure not updated: {message}")
-        self.caption.setStyleSheet("color: #a33;")
+        self.caption.setText(f"Figure not updated — Error: {message}")
+        self.caption.setStyleSheet("")
+
+    def set_result_state(self, state: str) -> None:
+        self.result_state.setText(state)
+
+    def mark_changes_not_applied(self) -> None:
+        if self.has_figure:
+            self.set_result_state("Changes not applied")
+
+    def mark_previous_result(self) -> None:
+        if self.has_figure:
+            self.set_result_state("Previous result")
+
+    def mark_current(self) -> None:
+        if self.has_figure:
+            self.set_result_state("Current")
 
     def export_current_figure(self) -> None:
         """Export the currently published Figure on the Qt GUI thread."""
