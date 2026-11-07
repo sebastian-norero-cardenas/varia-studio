@@ -98,7 +98,7 @@ class ScatterController(QObject):
 
         self._plot_epoch += 1
         epoch = self._plot_epoch
-        advanced_revision = self.view.advanced_revision
+        plot_settings_revision = self.view.plot_settings_revision
         self.current_spec = spec
         frame = snapshot.dataset.frame
         mask = snapshot.mask
@@ -107,7 +107,12 @@ class ScatterController(QObject):
         token = self._submit_task(
             "scatter",
             lambda cancel: prepare_scatter(frame, spec, mask, cancel=cancel),
-            success=lambda data: self._install_scatter(data, spec, epoch, advanced_revision),
+            success=lambda data: self._install_scatter(
+                data,
+                spec,
+                epoch,
+                plot_settings_revision,
+            ),
             failure=self._prepare_failure,
             receiver=self,
             exclusive_group="plots",
@@ -120,7 +125,7 @@ class ScatterController(QObject):
         data: ScatterData,
         spec: ScatterSpec,
         epoch: int,
-        advanced_revision: int,
+        plot_settings_revision: int,
     ) -> None:
         if self._closing or epoch != self._plot_epoch or spec != self.current_spec:
             return
@@ -143,7 +148,7 @@ class ScatterController(QObject):
             len(data.x),
             len(data.excluded_x),
         )
-        if advanced_revision != self.view.advanced_revision:
+        if plot_settings_revision != self.view.plot_settings_revision:
             warning = "Figure uses previous settings. Plot again to apply current settings."
             self.view.set_feedback(f"{data.description}\n{warning}")
             self._set_status(
