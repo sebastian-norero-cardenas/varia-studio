@@ -56,7 +56,6 @@ class HistogramController(QObject):
             self.current_counts = None
             self.view.set_dataset(snapshot.dataset)
             self.view.panel.clear()
-        self.view.mark_result_cleared()
             self.view.mark_result_cleared()
             return
 
